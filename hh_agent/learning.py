@@ -147,7 +147,7 @@ def report(cfg: Config, days: int = 7) -> None:
         "tuning": Store(cfg).tuning,
         "config": {"min_score": cfg.apply.auto.min_score, "daily_limit": cfg.apply.daily_limit},
     }
-    rv = ask_json(cfg, REPORT_SYSTEM, json.dumps(stats, ensure_ascii=False, indent=1), Report)
+    rv = ask_json(cfg, REPORT_SYSTEM, json.dumps(stats, ensure_ascii=False, indent=1), Report, purpose="report")
     console.rule(f"[bold]Отчёт за {days} дн.")
     console.print(rv.summary, markup=False)
     if rv.findings:

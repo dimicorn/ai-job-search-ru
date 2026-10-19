@@ -38,6 +38,41 @@ class Letter(BaseModel):
     cover_letter: str
 
 
+# Пачки: обвязка Codex (~12 тыс. токенов) и резюме оплачиваются один раз на пачку, а не на вакансию.
+class ScoreItem(Score):
+    vacancy_id: int
+
+
+class AssessmentItem(Assessment):
+    vacancy_id: int
+
+
+class ScoreBatch(BaseModel):
+    items: list[ScoreItem]
+
+
+class AssessmentBatch(BaseModel):
+    items: list[AssessmentItem]
+
+
+class LetterItem(Letter):
+    vacancy_id: int
+
+
+class LetterBatch(BaseModel):
+    items: list[LetterItem]
+
+
+BATCH_NOTE = """Ниже несколько вакансий. Оцени каждую независимо от остальных — не сравнивай их между
+собой и не подгоняй баллы друг под друга. Верни в items ровно по одному элементу на каждую
+вакансию; vacancy_id — из атрибута id тега <vacancy>."""
+
+LETTERS_NOTE = """Напиши по сопроводительному письму для каждой вакансии ниже — каждое отдельно, под эту
+вакансию. Верни в items по одному элементу на вакансию; vacancy_id — из атрибута id тега <vacancy>."""
+
+DESCRIPTION_LIMIT = 5000  # знаков описания вакансии в запросе; длиннее — обычно шаблонный хвост
+
+
 LETTER_RULES = """Сопроводительное письмо на русском (на английском — если вакансия на английском),
 500–900 знаков, без приветствий-шаблонов вроде «Уважаемый работодатель».
 Свяжи 2–3 конкретных требования вакансии с конкретным опытом из резюме — цифры, проекты, стек.
@@ -105,7 +140,7 @@ def _vacancy_prompt(row) -> str:
         f"Опыт: {row['experience']}\n"
         f"Формат: {', '.join(dec_list(row['work_formats'])) or 'не указан'}\n"
         f"Ключевые навыки: {', '.join(dec_list(row['key_skills'])) or '—'}\n\n"
-        f"<vacancy_description>\n{row['description']}\n</vacancy_description>"
+        f"<vacancy_description>\n{(row['description'] or '')[:DESCRIPTION_LIMIT]}\n</vacancy_description>"
     )
 
 
@@ -128,7 +163,7 @@ class Analyst:
 
     def assess(self, row) -> Assessment:
         """Оценка; письмо — в том же запросе (same) или отдельно от Codex, если балл проходной."""
-        out = ask_json(self.cfg, self.system, _vacancy_prompt(row), self.out_model)
+        out = ask_json(self.cfg, self.system, _vacancy_prompt(row), self.out_model, purpose="score")
         out.score = max(0, min(100, out.score))
         if isinstance(out, Assessment):
             return out
@@ -144,7 +179,7 @@ class Analyst:
         content = _vacancy_prompt(row)
         if extra:
             content += f"\n\nДополнительные указания кандидата к письму: {extra}"
-        return ask_json(self.cfg, self.system, content, Assessment).cover_letter
+        return ask_json(self.cfg, self.system, content, Assessment, purpose="letter").cover_letter
 
     def _codex_letter(self, row, reasons: list[str], extra: str | None = None) -> str:
         prompt = CODEX_PROMPT.format(
@@ -152,7 +187,61 @@ class Analyst:
             reasons="\n".join(f"- {r}" for r in reasons) or "—",
             extra=f"\nДополнительные указания кандидата к письму: {extra}\n" if extra else "",
         )
-        return run_codex(prompt, Letter, self.cfg.analyst.codex_model).cover_letter.strip()
+        return run_codex(prompt, Letter, self.cfg.analyst.codex_model, self.cfg, "letter").cover_letter.strip()
+
+    def assess_batch(self, rows) -> dict[int, Assessment]:
+        """Оценить пачку вакансий одним вызовом. Письма (letter_backend: codex) — отдельно, letters_batch."""
+        batch_model = AssessmentBatch if self.letters_here else ScoreBatch
+        user = BATCH_NOTE + "\n\n" + "\n\n".join(
+            f'<vacancy id="{r["id"]}">\n{_vacancy_prompt(r)}\n</vacancy>' for r in rows)
+        out = ask_json(self.cfg, self.system, user, batch_model, purpose="score")
+        ids = {r["id"] for r in rows}
+        res: dict[int, Assessment] = {}
+        for it in out.items:
+            if it.vacancy_id in ids and it.vacancy_id not in res:
+                d = it.model_dump(exclude={"vacancy_id"})
+                d["score"] = max(0, min(100, d["score"]))
+                res[it.vacancy_id] = Assessment(**{"cover_letter": "", **d})
+        return res
+
+    def letters_batch(self, rows, reasons: dict[int, list[str]]) -> dict[int, str]:
+        """Письма для пачки вакансий одним вызовом Codex."""
+        vac = "\n\n".join(
+            f'<vacancy id="{r["id"]}">\n{_vacancy_prompt(r)}\n\n'
+            f'Чем кандидат подходит и где пробелы (по оценке аналитика):\n'
+            + ("\n".join(f"- {x}" for x in reasons.get(r["id"], [])) or "—") + "\n</vacancy>"
+            for r in rows)
+        prompt = CODEX_PROMPT.split("<resume>")[0].replace(
+            "Напиши сопроводительное письмо для отклика на вакансию (hh.ru или Хабр Карьера).", LETTERS_NOTE
+        ).replace("нужен только текст письма в поле cover_letter", "нужны только письма в items").format(
+            rules=LETTER_RULES, style=self.style) + f"<resume>\n{self.resume}\n</resume>\n\n{vac}"
+        out = run_codex(prompt, LetterBatch, self.cfg.analyst.codex_model, self.cfg, "letter")
+        ids = {r["id"] for r in rows}
+        return {it.vacancy_id: it.cover_letter.strip() for it in out.items if it.vacancy_id in ids}
+
+
+def _chunks(seq, n):
+    seq = list(seq)
+    return [seq[i:i + n] for i in range(0, len(seq), max(1, n))]
+
+
+def _write_letters(cfg: Config, db: DB, analyst: Analyst, rows) -> int:
+    """Письма для подходящих вакансий пачками (letter_backend: codex). Неудачи — письмо напишут при отклике."""
+    done = 0
+    for chunk in _chunks(rows, cfg.analyst.letter_batch_size):
+        try:
+            letters = analyst.letters_batch(chunk, {r["id"]: dec_list(r["reasons"]) for r in chunk})
+        except LimitReached as e:
+            console.print(f"[yellow]Лимит исчерпан, письма — при отклике: {e}[/]")
+            break
+        except RuntimeError as e:
+            console.print(f"  [red]× письма: {e}[/]")
+            continue
+        for r in chunk:
+            if letters.get(r["id"]):
+                db.update(r["id"], cover_letter=letters[r["id"]])
+                done += 1
+    return done
 
 
 def analyze_new(cfg: Config, db: DB) -> int:
@@ -163,29 +252,38 @@ def analyze_new(cfg: Config, db: DB) -> int:
     analyst = Analyst(cfg)
     done = errors = passed = 0
     limit = False
-    for row in rows:
+    for chunk in _chunks(rows, cfg.analyst.batch_size):
         try:
-            a = analyst.assess(row)
+            res = analyst.assess_batch(chunk)
         except LimitReached as e:
             console.print(f"[yellow]Лимит исчерпан, остановка (остальное оценится при следующем запуске): {e}[/]")
             limit = True
             break
         except RuntimeError as e:
-            db.update(row["id"], status="error", error=f"analyst: {e}")
-            console.print(f"  [red]×[/] {row['title']}: {e}")
-            errors += 1
-            log_event(cfg, "error", where="analyze", vid=row["id"], message=str(e)[:500])
+            console.print(f"  [red]× пачка из {len(chunk)}: {e}[/] — оценится при следующем запуске")
+            errors += len(chunk)
+            log_event(cfg, "error", where="analyze", message=str(e)[:500])
             continue
-        passed += a.score >= cfg.analyst.min_score
-        db.update(
-            row["id"], status="scored", score=a.score, verdict=a.verdict,
-            reasons=a.reasons, red_flags=a.red_flags, cover_letter=a.cover_letter,
-        )
-        color = "green" if a.score >= cfg.analyst.min_score else "dim"
-        console.print(f"  [{color}]{a.score:>3}[/] {row['title']} — {row['company']}")
-        done += 1
+        for row in chunk:
+            a = res.get(row["id"])
+            if a is None:  # модель пропустила вакансию — остаётся new, оценится в следующий раз
+                console.print(f"  [yellow]?[/] {row['title']} — нет в ответе, оценю позже")
+                continue
+            passed += a.score >= cfg.analyst.min_score
+            db.update(row["id"], status="scored", score=a.score, verdict=a.verdict,
+                      reasons=a.reasons, red_flags=a.red_flags, cover_letter=a.cover_letter or None)
+            color = "green" if a.score >= cfg.analyst.min_score else "dim"
+            console.print(f"  [{color}]{a.score:>3}[/] {row['title']} — {row['company']}")
+            done += 1
+    if not analyst.letters_here and not limit:
+        need = [db.get(r["id"]) for r in rows]
+        need = [r for r in need if r and r["status"] == "scored" and (r["score"] or 0) >= cfg.analyst.min_score
+                and not r["cover_letter"]]
+        if need:
+            console.print(f"Пишу письма: {len(need)}")
+            _write_letters(cfg, db, analyst, need)
     log_event(cfg, "analyze", scored=done, passed=passed, errors=errors, limit=limit,
-              backend=cfg.analyst.backend, left=len(rows) - done - errors)
+              backend=cfg.analyst.backend, left=len(rows) - done)
     return done
 
 
@@ -193,6 +291,10 @@ def rewrite_letters(cfg: Config, db: DB, min_score: int | None = None) -> int:
     """Перегенерировать письма для оценённых вакансий (например, после смены letter_backend)."""
     rows = db.by_status("scored", min_score=cfg.analyst.min_score if min_score is None else min_score)
     analyst = Analyst(cfg)
+    if not analyst.letters_here:
+        n = _write_letters(cfg, db, analyst, rows)
+        console.print(f"Писем переписано: {n} из {len(rows)}")
+        return n
     done = 0
     for row in rows:
         try:

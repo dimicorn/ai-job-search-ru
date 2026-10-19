@@ -59,7 +59,9 @@ analyst:
   effort: medium                     # low | medium | high
   letter_backend: codex              # codex — письма пишет Codex отдельным запросом, только для проходных;
                                      # same — письмо в том же запросе, что и оценка
-  codex_model: null                  # null — модель по умолчанию из ~/.codex/config.toml
+  codex_model: null                  # null — модель Codex по умолчанию
+  batch_size: 8                      # вакансий на один вызов оценки (меньше токенов на вакансию)
+  letter_batch_size: 4               # писем на один вызов
   min_score: 70                      # в review попадают вакансии с баллом не ниже
   resume_file: resume.md
   preferences: |

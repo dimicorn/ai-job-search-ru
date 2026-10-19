@@ -177,12 +177,19 @@ SOURCES = {
 }
 
 
+def sorted_by_date(s: Search) -> bool:
+    """Выдача отсортирована по дате (hh: order_by=publication_time, Хабр: sort=date)."""
+    q = dict(parse_qsl(urlparse(s.url).query)) if s.url else {k: str(v) for k, v in s.params.items()}
+    return q.get("order_by") == "publication_time" or q.get("sort") == "date"
+
+
 def scan(cfg: Config, db: DB, page: Page) -> int:
     added = 0
     for s in cfg.searches:
         search_page, fetch_details = SOURCES[s.source]
         console.rule(f"[bold]Поиск: {s.name}[/] ({SITES[s.source]})")
         stats = {"source": s.source, "total": None, "pages": 0, "added": 0, "filtered": 0, "seen": 0}
+        by_date = sorted_by_date(s)
         for n in range(s.max_pages):
             total, cards = search_page(page, s, n)
             if n == 0:
@@ -191,6 +198,11 @@ def scan(cfg: Config, db: DB, page: Page) -> int:
             if not cards:
                 break
             stats["pages"] += 1
+            if by_date and all(db.exists(vid) for vid, _, _ in cards):
+                # Выдача по дате: страница целиком из известных — дальше только более старые.
+                stats["seen"] += len(cards)
+                console.print(f"Страница {n + 1}: новых нет — дальше только уже известные, поиск закончен.")
+                break
             for vid, card, responded in cards:
                 if db.exists(vid):
                     stats["seen"] += 1

@@ -131,7 +131,7 @@ def answer(cfg: Config, questions: list[dict[str, Any]], vacancy: str) -> QAnswe
                 + ("; варианты: " + " | ".join(f"{j}) {o}" for j, o in enumerate(x["options"])) if x["options"] else "")
                 + (f"; подсказка: {x['placeholder']}" if x["placeholder"] else "")
                 for x in questions) + "\n</fields>")
-    return ask_json(cfg, SYSTEM, user, QAnswers)
+    return ask_json(cfg, SYSTEM, user, QAnswers, purpose="questions")
 
 
 def fill(page: Page, questions: list[dict[str, Any]], answers: QAnswers, letter: str, type_text) -> None:
