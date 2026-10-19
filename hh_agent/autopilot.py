@@ -151,6 +151,14 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
         return
 
     rows = db.by_status("scored", min_score=threshold)
+    need = au.daily_target - db.applied_today()
+    if min_score is None and not dry_run and need > len(rows) and au.target_min_score < threshold:
+        extra = [r for r in db.by_status("scored", min_score=au.target_min_score) if r["score"] < threshold]
+        extra = extra[:need - len(rows)]
+        if extra:
+            rows += extra
+            _log(f"До нормы {au.daily_target} не хватает вакансий с баллом ≥ {threshold} — "
+                 f"добираю {len(extra)} с баллом от {au.target_min_score}.")
     if not rows:
         _log(f"Нет оценённых вакансий с баллом ≥ {threshold}.")
         return
@@ -287,3 +295,5 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
               applied_today=db.applied_today(), pace=pace)
     _log(f"Готово: {'заполнено форм' if dry_run else 'откликов'} — {done}. "
          f"Сегодня всего откликов: {db.applied_today()}/{cfg.apply.daily_limit}")
+    if not dry_run and db.applied_today() < au.daily_target:
+        _log(f"[yellow]Норма {au.daily_target} не выполнена ({db.applied_today()}): {stop_reason}.[/]")

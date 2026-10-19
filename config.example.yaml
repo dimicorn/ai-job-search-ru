@@ -82,6 +82,8 @@ apply:
   auto:
     min_score: 75                    # только вакансии с баллом не ниже
     max_per_run: 10                  # максимум откликов за один запуск
+    daily_target: 0                  # норма в сутки: не хватает вакансий с min_score — добираем ниже; 0 — выкл.
+    target_min_score: 55             #   но не ниже этого балла
     skip_employer_tests: false       # true — вакансии с тестом сразу в manual (иначе агент отвечает на вопросы)
     active_hours: [8, 23]            # откликаться только с 8:00 до 23:00 (локальное время)
     weekdays_only: false

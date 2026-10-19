@@ -53,6 +53,8 @@ class AutoApply(BaseModel):
     """Полностью автоматические отклики (hh-agent auto). Все паузы случайные в указанных границах."""
     min_score: int = 75                       # откликаться только на вакансии с баллом не ниже
     max_per_run: int = 10                     # максимум откликов за один запуск
+    daily_target: int = 0                     # норма в сутки; не хватает вакансий с min_score — добираем ниже; 0 — выкл.
+    target_min_score: int = 55                # до какого балла можно опускаться ради нормы
     skip_employer_tests: bool = False         # True — вакансии с тестом сразу в manual, без попыток
     active_hours: tuple[int, int] = (8, 23)   # работать только в эти часы (локальное время)
     weekdays_only: bool = False
