@@ -61,6 +61,7 @@ class AutoApply(BaseModel):
     break_every: int = 5                              # после стольких откликов — длинный перерыв
     break_seconds: tuple[float, float] = (900, 1800)
     max_consecutive_errors: int = 3                   # столько ошибок подряд — остановка (вёрстка поменялась?)
+    captcha_wait_minutes: int = 15                    # капча: уведомить и ждать, пока пройдёте; 0 — сразу стоп
 
 
 class Apply(BaseModel):

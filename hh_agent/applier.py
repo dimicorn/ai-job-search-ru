@@ -25,7 +25,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from . import questions
-from .browser import check_captcha, page_state, pause, source_of
+from .browser import captcha_visible, check_captcha, page_state, pause, source_of
 from .config import Config
 from .events import SESSION, log_event
 from .learning import Store
@@ -216,6 +216,9 @@ class Applier:
         while time.monotonic() < deadline:
             if self.page.locator(SEL["responded"]).count():
                 return True
+            if captcha_visible(self.page):
+                check_captcha(self.page)  # auto — CaptchaError (остановка), review — ждём, пока пройдёте
+                deadline = time.monotonic() + (timeout_ms or self.confirm_timeout) / 1000
             if on_form_page and "vacancy_response" not in self.page.url:
                 return True
             self.page.wait_for_timeout(500)
@@ -251,7 +254,15 @@ class Applier:
                 return "manual", self._debug_dump(vid, "кнопка отправки не найдена")
             self._beat()
             btn.click()
-        return ("applied", None) if self._wait_confirmed() else ("unconfirmed", "отправка не подтвердилась")
+        if self._wait_confirmed():
+            return "applied", None
+        # Не подтвердилось: сохраняем страницу и тексты ошибок формы — по ним видно, что не так.
+        errs = self.page.evaluate("""() => [...document.querySelectorAll(
+            '[role=alert], [data-qa*=error], [class*=error], [class*=Error], [aria-invalid=true]')]
+            .filter(e => e.offsetWidth || e.offsetHeight).map(e => (e.innerText || e.getAttribute('aria-label') || '').trim())
+            .filter(Boolean).slice(0, 5)""")
+        why = "отправка не подтвердилась" + (f": {'; '.join(errs)[:300]}" if errs else "")
+        return "unconfirmed", self._debug_dump(vid, why)
 
     # ── вопросы работодателя ──────────────────────────────────────────
     def _letter_selectors(self) -> list[str]:

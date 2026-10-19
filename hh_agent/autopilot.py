@@ -135,9 +135,9 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
             try:
                 status, note = applier_for(row["url"]).apply(row["id"], row["url"], letter,
                                                             analyst_mod._vacancy_prompt(row))
-            except CaptchaError:
+            except CaptchaError as e:
                 log_event(cfg, "captcha", where="apply", vid=row["id"], done=done)
-                _log("[red]hh.ru показал капчу — останавливаюсь.[/] Пройдите её, запустив review в терминале.")
+                _log(f"[red]{e} — останавливаюсь.[/] Вакансия останется в очереди.")
                 stop_reason = "капча"
                 break
             except Exception as e:  # вёрстка hh меняется — считаем ошибки подряд

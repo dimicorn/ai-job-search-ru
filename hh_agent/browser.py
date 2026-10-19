@@ -1,7 +1,9 @@
 """Общий браузер: persistent-профиль Chromium с вашими сессиями hh.ru и Хабр Карьеры."""
 from __future__ import annotations
 
+import fcntl
 import random
+import subprocess
 import sys
 import time
 from contextlib import contextmanager
@@ -34,9 +36,25 @@ def source_of(url: str) -> str:
 
 @contextmanager
 def open_browser(cfg: Config, headless: bool = False) -> Iterator[tuple[BrowserContext, Page]]:
+    global _CFG, _HEADLESS
+    _CFG, _HEADLESS = cfg, headless
     profile = cfg.path(cfg.browser.profile_dir)
     profile.mkdir(parents=True, exist_ok=True)
-    with sync_playwright() as p:
+    # Профиль Chromium нельзя открыть в двух процессах: ждём, пока освободится (до 3 часов).
+    lock = open(profile.parent / ".hh-agent.lock", "w")
+    waited = 0
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if waited == 0:
+                print("Браузер агента занят другим запуском hh-agent — жду…", flush=True)
+            if waited > 3 * 3600:
+                raise SystemExit("Профиль браузера занят больше 3 часов — выхожу.")
+            time.sleep(30)
+            waited += 30
+    with lock, sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             str(profile),
             headless=headless,
@@ -62,11 +80,65 @@ class CaptchaError(Exception):
     """hh.ru показал капчу, а человека рядом нет."""
 
 
+# Капча hh бывает отдельной страницей, а бывает модальным окном поверх формы отклика
+# («Complete the CAPTCHA» / «Подтвердите, что вы не робот») — после нажатия «Отправить».
+_CAPTCHA_SEL = ("[data-qa='account-captcha-input'], [data-qa*='captcha'], iframe[src*='captcha'], "
+                "img[src*='captcha'], input[name*='captcha' i]")
+_CAPTCHA_TEXT = r"Complete the CAPTCHA|not a robot|не робот|Введите текст с картинки|Text from the picture"
+
+
+def captcha_visible(page: Page) -> bool:
+    import re
+    if "captcha" in page.url:
+        return True
+    if page.locator(_CAPTCHA_SEL).locator("visible=true").count():
+        return True
+    return page.get_by_text(re.compile(_CAPTCHA_TEXT, re.I)).locator("visible=true").count() > 0
+
+
+_CFG: Config | None = None   # выставляет open_browser
+_HEADLESS = False
+
+
+def notify(title: str, text: str) -> None:
+    """Уведомление macOS со звуком."""
+    safe = lambda s: s.replace("\\", " ").replace('"', "'")[:200]
+    try:
+        subprocess.run(["osascript", "-e",
+                        f'display notification "{safe(text)}" with title "{safe(title)}" sound name "Glass"'],
+                       check=False, capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _wait_for_human(page: Page) -> None:
+    """auto: капчу проходит человек. Уведомление → ждём, пока окно капчи исчезнет; не дождались — CaptchaError."""
+    from .events import log_event
+
+    wait_s = (_CFG.apply.auto.captcha_wait_minutes * 60) if _CFG else 0
+    if _HEADLESS or wait_s <= 0:
+        raise CaptchaError("hh.ru показал капчу")
+    page.bring_to_front()
+    notify("hh-agent: пройдите капчу", f"hh.ru просит подтвердить, что вы не робот. Жду {wait_s // 60} мин.")
+    print(f"\n⚠️  hh.ru показал капчу. Пройдите её в окне браузера — жду до {wait_s // 60} мин…", flush=True)
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < wait_s:
+        page.wait_for_timeout(3000)
+        if not captcha_visible(page):
+            if _CFG:
+                log_event(_CFG, "captcha", where="apply", solved=True, waited=round(time.monotonic() - t0))
+            print("Капча пройдена — продолжаю.", flush=True)
+            return
+    raise CaptchaError("капчу не прошли вовремя")  # событие пишет вызывающий код (с id вакансии)
+
+
 def check_captcha(page: Page) -> None:
-    """hh.ru иногда показывает капчу: в терминале ждём человека, без терминала — останавливаемся."""
-    if "captcha" in page.url or page.locator("[data-qa='account-captcha-input'], iframe[src*='captcha']").count():
+    """hh.ru иногда показывает капчу. Агент её никогда не решает сам: в терминале ждёт Enter,
+    в auto — уведомляет и ждёт, пока её пройдёт человек (apply.auto.captcha_wait_minutes)."""
+    if captcha_visible(page):
         if not sys.stdin.isatty():
-            raise CaptchaError("hh.ru показал капчу")
+            _wait_for_human(page)
+            return
         input("\n⚠️  hh.ru показал капчу. Пройдите её в окне браузера и нажмите Enter… ")
 
 
