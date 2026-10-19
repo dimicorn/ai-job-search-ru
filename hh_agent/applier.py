@@ -25,7 +25,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from . import questions
-from .browser import captcha_visible, check_captcha, page_state, pause, source_of
+from .browser import CaptchaError, captcha_visible, check_captcha, page_state, pause, source_of
 from .config import Config
 from .events import SESSION, log_event
 from .learning import Store
@@ -94,10 +94,9 @@ class Applier:
     def __init__(self, page: Page, cfg: Config, mode: Mode):
         self.page, self.cfg, self.mode = page, cfg, mode
         self.auto = cfg.apply.auto
-        self.store = Store(cfg)
-        self.form_timeout = self.store.tuning["form_timeout_ms"]
-        self.confirm_timeout = self.store.tuning["confirm_timeout_ms"]
-        self.used: dict[str, str] = {}  # выученные селекторы, сработавшие в текущем отклике
+        self.tuning = Store(cfg).tuning  # подстройка по правилам: паузы и таймауты
+        self.form_timeout = self.tuning["form_timeout_ms"]
+        self.confirm_timeout = self.tuning["confirm_timeout_ms"]
 
     # ── мелкие действия ────────────────────────────────────────────────
     def _beat(self) -> None:
@@ -136,7 +135,7 @@ class Applier:
         """Пролистать вакансию, как будто её читают."""
         if not self.mode.human_like:
             return
-        total = random.uniform(*self.auto.read_seconds) * self.store.tuning["pace_multiplier"]
+        total = random.uniform(*self.auto.read_seconds) * self.tuning["pace_multiplier"]
         steps = random.randint(2, 5)
         for _ in range(steps):
             self.page.mouse.wheel(0, random.randint(250, 700))
@@ -145,17 +144,14 @@ class Applier:
         self._beat()
 
     def _find(self, key: str, fallback: str | None = None):
-        """Видимый элемент: data-qa → выученные селекторы (лучшие первыми) → запасной селектор."""
-        learned = self.store.selectors(key)
-        for sel in (SEL.get(key), *learned, fallback):
+        """Видимый элемент: сначала по data-qa, затем по запасному селектору."""
+        for sel in (SEL.get(key), fallback):
             if not sel:
                 continue
             try:
                 # Поля, размеченные как вопросы работодателя, не трогаем (иначе письмо затрёт ответ).
                 loc = self.page.locator(sel).and_(self.page.locator(":not([data-hhagent-q])")).locator("visible=true")
                 if loc.count():
-                    if sel in learned:
-                        self.used[key] = sel
                     return loc.first
             except Exception:  # кривой селектор не должен ронять отклик
                 continue
@@ -266,10 +262,7 @@ class Applier:
 
     # ── вопросы работодателя ──────────────────────────────────────────
     def _letter_selectors(self) -> list[str]:
-        out = []
-        for key in ("popup_letter", "informer_letter"):
-            out += [SEL[key], *self.store.selectors(key)]
-        return out
+        return [SEL["popup_letter"], SEL["informer_letter"]]
 
     def _questionnaire(self, vid: int, letter: str, vacancy: str) -> tuple[str, str | None]:
         """Ответить на вопросы (сколько бы их ни было), приложить письмо и отправить."""
@@ -318,8 +311,7 @@ class Applier:
     def apply(self, vid: int, url: str, letter: str, vacancy: str = "") -> tuple[str, str | None]:
         """Статус: applied | already_applied | manual | dry_run | unconfirmed (ошибки — исключения).
 
-        Каждый отклик пишется в журнал событий, а выученные селекторы получают +1/−1."""
-        self.used = {}
+        Каждый отклик пишется в журнал событий."""
         t0 = time.monotonic()
         mode = "dry_run" if self.mode.dry_run else "auto" if not self.mode.interactive else "review"
         try:
@@ -327,14 +319,14 @@ class Applier:
                 status, note = self._apply_habr(vid, url, letter)
             else:
                 status, note = self._apply(vid, url, letter, vacancy)
+        except CaptchaError:
+            raise  # не сбой вёрстки: капчу разбирает вызывающий код
         except Exception as e:
-            self.store.record(self.used, ok=False)
             self._debug_dump(vid, f"сбой отклика: {type(e).__name__}")
             log_event(self.cfg, "error", where="apply", vid=vid, mode=mode, message=f"{type(e).__name__}: {e}"[:500])
             raise
-        self.store.record(self.used, ok=status in ("applied", "dry_run"))
         log_event(self.cfg, "apply", vid=vid, mode=mode, status=status, note=note,
-                  used=self.used, seconds=round(time.monotonic() - t0))
+                  seconds=round(time.monotonic() - t0))
         return status, note
 
     def _apply(self, vid: int, url: str, letter: str, vacancy: str) -> tuple[str, str | None]:

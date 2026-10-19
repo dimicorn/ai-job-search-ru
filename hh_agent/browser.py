@@ -98,6 +98,11 @@ def captcha_visible(page: Page) -> bool:
 
 _CFG: Config | None = None   # выставляет open_browser
 _HEADLESS = False
+DEFER_CAPTCHA = False         # auto с двумя сайтами: не ждать капчу, а работать на другом сайте
+
+
+class CaptchaPending(CaptchaError):
+    """Капча показана и ждёт человека; агент тем временем работает на другом сайте."""
 
 
 def notify(title: str, text: str) -> None:
@@ -119,7 +124,9 @@ def _wait_for_human(page: Page) -> None:
     if _HEADLESS or wait_s <= 0:
         raise CaptchaError("hh.ru показал капчу")
     page.bring_to_front()
-    notify("hh-agent: пройдите капчу", f"hh.ru просит подтвердить, что вы не робот. Жду {wait_s // 60} мин.")
+    notify("hh-agent: пройдите капчу", f"Сайт просит подтвердить, что вы не робот. Жду {wait_s // 60} мин.")
+    if DEFER_CAPTCHA:
+        raise CaptchaPending("капча ждёт человека")
     print(f"\n⚠️  hh.ru показал капчу. Пройдите её в окне браузера — жду до {wait_s // 60} мин…", flush=True)
     t0 = time.monotonic()
     while time.monotonic() - t0 < wait_s:

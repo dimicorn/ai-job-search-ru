@@ -15,7 +15,7 @@ from rich.table import Table
 from . import analyst as analyst_mod
 from .applier import apply_one
 from .autopilot import run_auto
-from .learning import learn
+from .learning import learn, report
 from .browser import LOGIN_URL, SITES, SiteTabs, is_logged_in, open_browser, pause, source_of
 from .config import Config, load_config
 from .db import DB, dec_list
@@ -229,7 +229,8 @@ def main() -> None:
     au.add_argument("--limit", type=int, help="максимум откликов за запуск")
     au.add_argument("--min-score", type=int)
     sub.add_parser("autopilot", help="scan + оценка + auto — для запуска по расписанию")
-    sub.add_parser("learn", help="разобрать debug/ и логи и подстроить агента (обычно — само в конце сессии)")
+    rp = sub.add_parser("report", help="сводка и рекомендации по журналу событий за N дней (через LLM)")
+    rp.add_argument("--days", type=int, default=7)
     sub.add_parser("stats", help="статистика")
     ls = sub.add_parser("list", help="список вакансий по статусу")
     ls.add_argument("status", choices=["new", "filtered", "scored", "skipped", "applied", "unconfirmed", "manual", "error"])
@@ -240,7 +241,7 @@ def main() -> None:
             f"Команда {a.cmd} интерактивная: запустите её в обычном окне терминала "
             "(не через `!` в Claude Code и не из cron)."
         )
-    if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot", "learn"):
+    if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot"):
         _keep_awake()
     cfg = load_config(a.config)
     db = DB(cfg.path(cfg.db_path))
@@ -259,8 +260,8 @@ def main() -> None:
             learn(cfg, db)
     elif a.cmd == "requeue":
         cmd_requeue(cfg, db, a.all)
-    elif a.cmd == "learn":
-        learn(cfg, db)
+    elif a.cmd == "report":
+        report(cfg, a.days)
     elif a.cmd == "auto":
         run_auto(cfg, db, dry_run=a.dry_run, limit=a.limit, min_score=a.min_score)
     elif a.cmd == "autopilot":
