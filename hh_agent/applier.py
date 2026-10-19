@@ -115,14 +115,14 @@ class Applier:
             field.click()
             field.fill("")
             delay = random.uniform(lo, hi)
-            kb = self.page.keyboard
-            # Печатаем в поле с фокусом. Переносы вставляем без нажатия Enter: в окне отклика hh
-            # Enter сворачивает поле письма, и печать зависает.
+            # Печатаем построчно прямо в поле (не «в фокус страницы»). Переносы вставляем без
+            # нажатия Enter: в окне отклика hh Enter сворачивает поле письма.
             for i, line in enumerate(text.split("\n")):
                 if i:
-                    kb.insert_text("\n")
+                    field.focus()
+                    self.page.keyboard.insert_text("\n")
                 if line:
-                    kb.type(line, delay=delay)
+                    field.press_sequentially(line, delay=delay, timeout=len(line) * delay * 2 + 15_000)
         else:
             field.fill(text)
         try:
@@ -318,6 +318,7 @@ class Applier:
                 status, note = self._apply(vid, url, letter, vacancy)
         except Exception as e:
             self.store.record(self.used, ok=False)
+            self._debug_dump(vid, f"сбой отклика: {type(e).__name__}")
             log_event(self.cfg, "error", where="apply", vid=vid, mode=mode, message=f"{type(e).__name__}: {e}"[:500])
             raise
         self.store.record(self.used, ok=status in ("applied", "dry_run"))

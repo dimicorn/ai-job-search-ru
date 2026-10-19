@@ -56,7 +56,7 @@ class AutoApply(BaseModel):
     weekdays_only: bool = False
     read_seconds: tuple[float, float] = (8, 20)       # «читаем» вакансию перед откликом
     action_seconds: tuple[float, float] = (0.8, 2.5)  # пауза между кликами внутри формы
-    typing_delay_ms: tuple[int, int] = (30, 90)       # печать письма посимвольно; [0, 0] — вставка целиком
+    typing_delay_ms: tuple[int, int] = (0, 0)         # (0, 0) — письмо вставляется целиком; >0 — печать посимвольно
     delay_seconds: tuple[float, float] = (90, 240)    # пауза между откликами
     break_every: int = 5                              # после стольких откликов — длинный перерыв
     break_seconds: tuple[float, float] = (900, 1800)
