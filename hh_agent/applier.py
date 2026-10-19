@@ -72,7 +72,7 @@ AFTER_CLICK = f"{FORM}, {SEL['relocation']}"
 # Хабр Карьера: «Откликнуться» сразу отправляет отклик, затем в той же секции появляется
 # поле письма и кнопка «Дополнить отклик».
 HABR_FORM = "#create-vacancy-response"
-HABR_LETTER = f"{HABR_FORM} textarea[name='body']"
+HABR_LETTER = f"{HABR_FORM} textarea"  # textarea[name=body] — единственное поле в секции
 
 
 @dataclass
