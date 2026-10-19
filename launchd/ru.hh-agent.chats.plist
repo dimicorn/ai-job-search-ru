@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Шаблон: __HOME__ подставляется при установке (см. README). -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ru.hh-agent.chats</string>
+
+    <!-- Ответы в чатах в 9, 13, 16 и 19 часов (autopilot в 10:00 тоже проверяет чаты).
+         Если в это время идёт autopilot, запуск дождётся, пока освободится браузер. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/uv</string>
+        <string>run</string>
+        <string>hh-agent</string>
+        <string>chats</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__HOME__/hh-agent</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <!-- uv, codex и claude лежат в ~/.local/bin; launchd по умолчанию его не видит. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>COLUMNS</key>
+        <string>120</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/hh-agent/logs/chats.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/hh-agent/logs/chats.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

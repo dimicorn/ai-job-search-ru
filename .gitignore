@@ -1,0 +1,12 @@
+.venv/
+.browser-profile/
+config.yaml
+resume.md
+*.db
+__pycache__/
+screenshots/
+debug/
+logs/
+learned.json
+.DS_Store
+.hh-agent.lock

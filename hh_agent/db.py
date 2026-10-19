@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import datetime, date
+from pathlib import Path
+from typing import Any, Iterable
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS vacancies (
+    id            INTEGER PRIMARY KEY,
+    search_name   TEXT,
+    title         TEXT,
+    company       TEXT,
+    salary_from   INTEGER,
+    salary_to     INTEGER,
+    currency      TEXT,
+    area          TEXT,
+    url           TEXT,
+    experience    TEXT,
+    work_formats  TEXT,
+    has_test      INTEGER DEFAULT 0,
+    letter_required INTEGER DEFAULT 0,
+    description   TEXT,
+    key_skills    TEXT,
+    found_at      TEXT,
+    -- new -> filtered | scored -> skipped | applied | unconfirmed | manual | error
+    status        TEXT DEFAULT 'new',
+    filter_reason TEXT,
+    score         INTEGER,
+    verdict       TEXT,
+    reasons       TEXT,
+    red_flags     TEXT,
+    cover_letter  TEXT,
+    applied_at    TEXT,
+    error         TEXT,
+    attempts      INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_status ON vacancies(status);
+CREATE TABLE IF NOT EXISTS chats (
+    chat_id     TEXT PRIMARY KEY,
+    last_msg_id TEXT,          -- последнее обработанное сообщение работодателя
+    -- replied | draft | ignored | closed
+    status      TEXT,
+    action      TEXT,
+    category    TEXT,
+    vacancy     TEXT,
+    employer    TEXT,
+    last_text   TEXT,
+    reply       TEXT,
+    reason      TEXT,
+    sent        INTEGER DEFAULT 0,
+    updated_at  TEXT
+);
+"""
+
+COLUMNS = {
+    "search_name", "title", "company", "salary_from", "salary_to", "currency", "area", "url",
+    "experience", "work_formats", "has_test", "letter_required", "description", "key_skills",
+    "found_at", "status", "filter_reason", "score", "verdict", "reasons", "red_flags",
+    "cover_letter", "applied_at", "error", "attempts",
+}
+
+
+class DB:
+    def __init__(self, path: Path):
+        self.conn = sqlite3.connect(path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(SCHEMA)
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(vacancies)")}
+        if "attempts" not in cols:  # миграция базы, созданной до появления обучения
+            self.conn.execute("ALTER TABLE vacancies ADD COLUMN attempts INTEGER DEFAULT 0")
+            self.conn.commit()
+
+    def exists(self, vid: int) -> bool:
+        return self.conn.execute("SELECT 1 FROM vacancies WHERE id=?", (vid,)).fetchone() is not None
+
+    def insert(self, vid: int, **fields: Any) -> None:
+        fields = {k: _enc(v) for k, v in fields.items() if k in COLUMNS}
+        fields.setdefault("found_at", datetime.now().isoformat(timespec="seconds"))
+        cols = ", ".join(["id", *fields])
+        marks = ", ".join("?" * (len(fields) + 1))
+        self.conn.execute(f"INSERT OR IGNORE INTO vacancies ({cols}) VALUES ({marks})", (vid, *fields.values()))
+        self.conn.commit()
+
+    def update(self, vid: int, **fields: Any) -> None:
+        bad = set(fields) - COLUMNS
+        if bad:
+            raise KeyError(bad)
+        sets = ", ".join(f"{k}=?" for k in fields)
+        self.conn.execute(f"UPDATE vacancies SET {sets} WHERE id=?", (*map(_enc, fields.values()), vid))
+        self.conn.commit()
+
+    def by_status(self, *statuses: str, min_score: int | None = None) -> list[sqlite3.Row]:
+        q = f"SELECT * FROM vacancies WHERE status IN ({','.join('?' * len(statuses))})"
+        args: list[Any] = list(statuses)
+        if min_score is not None:
+            q += " AND score >= ?"
+            args.append(min_score)
+        q += " ORDER BY score DESC, found_at DESC"
+        return self.conn.execute(q, args).fetchall()
+
+    def get(self, vid: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM vacancies WHERE id=?", (vid,)).fetchone()
+
+    def applied_today(self) -> int:
+        today = date.today().isoformat()
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM vacancies WHERE status IN ('applied', 'unconfirmed') AND applied_at >= ?", (today,)
+        ).fetchone()[0]
+
+    # ── чаты ──
+    def chat_handled(self, chat_id: str, msg_id: str) -> bool:
+        r = self.conn.execute("SELECT last_msg_id FROM chats WHERE chat_id=?", (chat_id,)).fetchone()
+        return r is not None and r[0] == msg_id
+
+    def save_chat(self, chat_id: str, msg_id: str, **f: Any) -> None:
+        f = {"last_msg_id": msg_id, "updated_at": datetime.now().isoformat(timespec="seconds"), **f}
+        cols = ", ".join(["chat_id", *f])
+        upd = ", ".join(f"{k}=excluded.{k}" for k in f)
+        self.conn.execute(f"INSERT INTO chats ({cols}) VALUES ({', '.join('?' * (len(f) + 1))}) "
+                          f"ON CONFLICT(chat_id) DO UPDATE SET {upd}", (chat_id, *map(_enc, f.values())))
+        self.conn.commit()
+
+    def update_chat(self, chat_id: str, **f: Any) -> None:
+        f["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(f"UPDATE chats SET {', '.join(f'{k}=?' for k in f)} WHERE chat_id=?",
+                          (*map(_enc, f.values()), chat_id))
+        self.conn.commit()
+
+    def chat_drafts(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM chats WHERE status='draft' ORDER BY updated_at").fetchall()
+
+    def chat_stats(self) -> Iterable[tuple[str, int]]:
+        return self.conn.execute("SELECT status, COUNT(*) FROM chats GROUP BY status").fetchall()
+
+    def stats(self) -> Iterable[tuple[str, int]]:
+        return self.conn.execute(
+            "SELECT status, COUNT(*) FROM vacancies GROUP BY status ORDER BY 2 DESC"
+        ).fetchall()
+
+
+def _enc(v: Any) -> Any:
+    if isinstance(v, (list, dict)):
+        return json.dumps(v, ensure_ascii=False)
+    if isinstance(v, bool):
+        return int(v)
+    return v
+
+
+def dec_list(s: str | None) -> list[str]:
+    return json.loads(s) if s else []

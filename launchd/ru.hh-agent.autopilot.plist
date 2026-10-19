@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Шаблон: __HOME__ подставляется при установке (см. README). -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ru.hh-agent.autopilot</string>
+
+    <!-- Каждый день в 10:00: поиск → оценка (Codex) → до 20 автооткликов с паузами.
+         Если Mac в это время спал, launchd запустит задачу при пробуждении. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/uv</string>
+        <string>run</string>
+        <string>hh-agent</string>
+        <string>autopilot</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__HOME__/hh-agent</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- uv, codex и claude лежат в ~/.local/bin; launchd по умолчанию его не видит. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>COLUMNS</key>
+        <string>120</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/hh-agent/logs/autopilot.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/hh-agent/logs/autopilot.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

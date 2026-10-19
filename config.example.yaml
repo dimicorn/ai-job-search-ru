@@ -1,0 +1,131 @@
+# Скопируйте в config.yaml и подставьте свои значения.
+
+# ── Поиски ─────────────────────────────────────────────────────────────
+# Каждый поиск — либо готовый URL с hh.ru или career.habr.com (настройте фильтры
+# на сайте и скопируйте адрес), либо набор параметров.
+searches:
+  - name: python-ml-remote
+    params:
+      text: "Python ML"              # язык запросов hh: "ML OR Data Scientist", NOT 1С и т.п.
+      search_field: [name, description]
+      area: [1, 2]                   # 1 — Москва, 2 — СПб, 113 — вся Россия
+      salary: 250000                 # «уровень дохода от»
+      only_with_salary: false
+      experience: between3And6       # noExperience | between1And3 | between3And6 | moreThan6
+      work_format: [REMOTE, HYBRID]  # REMOTE | HYBRID | ON_SITE | FIELD_WORK
+      search_period: 7               # за сколько дней: 1, 3, 7, 30
+      order_by: publication_time
+    max_pages: 3                     # по 50 вакансий на странице
+
+  # - name: from-site
+  #   url: "https://hh.ru/search/vacancy?text=data+engineer&area=113&work_format=REMOTE"
+  #   max_pages: 2
+
+  # ── Хабр Карьера (career.habr.com) ──
+  # source: habr, иначе поиск считается поиском по hh. URL с career.habr.com/vacancies
+  # тоже подходит — source тогда определится сам.
+  - name: ml-habr
+    source: habr
+    params:
+      q: "machine learning"          # текст запроса
+      "s[]": [44, 125, 177]          # специализации: 44 — учёный по данным, 125 — ML-разработчик,
+                                     # 177 — компьютерное зрение (полный список — фильтр на сайте)
+      qid: 4                         # уровень, одно значение: 1 Intern, 3 Junior, 4 Middle, 5 Senior, 6 Lead
+      remote: true                   # только удалёнка; Москва — "locations[]": c_678
+      salary: 250000                 # зарплата от
+      with_salary: false             # true — только с указанной зарплатой
+      sort: date                     # relevance | date | salary_desc
+    max_pages: 2                     # по 25 вакансий на странице
+
+  # - name: habr-from-site
+  #   url: "https://career.habr.com/vacancies?q=python&remote=true&type=all"
+
+# ── Локальные фильтры (до вызова LLM, бесплатно) ──────────────────────
+filters:
+  title_include_any: []              # если не пусто — в названии должно быть хотя бы одно слово
+  title_exclude: ["1С", "стажер", "стажёр", "intern", "junior", "преподаватель", "наставник"]
+  description_exclude: ["без оформления"]
+  companies_exclude: []
+  min_salary: null                   # отсекать, если указанная зарплата (верхняя граница) ниже, руб.
+  skip_without_salary: false
+  skip_with_employer_test: false
+
+# ── Аналитик (Claude) ─────────────────────────────────────────────────
+analyst:
+  backend: codex                     # оценка вакансий: codex — Codex CLI (подписка ChatGPT);
+                                     # claude_code — `claude -p` (подписка claude.ai);
+                                     # api — Claude API по ключу ANTHROPIC_API_KEY, оплата по токенам
+  model: claude-opus-5-5             # модель для claude_code / api
+  effort: medium                     # low | medium | high
+  letter_backend: codex              # codex — письма пишет Codex отдельным запросом, только для проходных;
+                                     # same — письмо в том же запросе, что и оценка
+  codex_model: null                  # null — модель по умолчанию из ~/.codex/config.toml
+  min_score: 70                      # в review попадают вакансии с баллом не ниже
+  resume_file: resume.md
+  preferences: |
+    Ищу позицию ML/Data Science инженера, удалёнка или гибрид.
+    Интересны CV, обработка сигналов, научные данные. Не интересны: чистая аналитика BI,
+    поддержка 1С, outstaff-галеры.
+  letter_style: |
+    Коротко и по делу, на «вы», без канцелярита.
+
+# ── Отклики ───────────────────────────────────────────────────────────
+apply:
+  daily_limit: 20                    # общий лимит в сутки (review + auto); hh режет ~200, держитесь сильно ниже
+  submit_mode: auto                  # auto — после [y] скрипт сам жмёт «Отправить»; manual — жмёте вы
+  resume_title: null                 # если резюме несколько — часть названия нужного
+  delay_seconds: [4, 9]              # пауза после отклика в review
+
+  # hh-agent auto — отклики без подтверждения. Все паузы случайные в границах [от, до].
+  auto:
+    min_score: 75                    # только вакансии с баллом не ниже
+    max_per_run: 10                  # максимум откликов за один запуск
+    skip_employer_tests: false       # true — вакансии с тестом сразу в manual (иначе агент отвечает на вопросы)
+    active_hours: [9, 21]            # откликаться только с 9:00 до 21:00 (локальное время)
+    weekdays_only: false
+    read_seconds: [8, 20]            # «читаем» вакансию, листая страницу, перед кликом
+    action_seconds: [0.8, 2.5]       # пауза между кликами внутри формы
+    typing_delay_ms: [30, 90]        # печать письма посимвольно (~1 мин на письмо); [0, 0] — вставить целиком
+    delay_seconds: [90, 240]         # пауза между откликами: 1.5–4 мин
+    break_every: 5                   # после каждых 5 откликов —
+    break_seconds: [900, 1800]       #   длинный перерыв 15–30 мин
+    max_consecutive_errors: 3        # 3 ошибки подряд — остановка (вероятно, поменялась вёрстка)
+
+# ── Вопросы работодателя в форме отклика ─────────────────────────────
+# Агент отвечает по резюме, вакансии и фактам ниже. Если для ответа нужен факт,
+# которого здесь нет, — отклик откладывается в manual, а вопрос пишется в logs/questions.md.
+questions:
+  enabled: true
+  max_fields: 30                     # больше полей в форме — отдать человеку
+  confirm_in_review: true            # в review показать ответы и спросить перед отправкой
+  facts: |
+    # Частые вопросы работодателей — заполните своими ответами:
+    # Ожидаемая зарплата:
+    # Город, готовность к переезду и командировкам:
+    # Формат работы и занятость:
+    # Гражданство и разрешение на работу:
+    # Языки:
+    # Срок выхода на работу:
+    # Нужна ли ИТ-аккредитация работодателя:
+    # Почему ищу работу сейчас:
+
+# ── Чаты с работодателями ───────────────────────────────────────────
+# Простые вопросы (актуален ли поиск, стек, зарплата, срок выхода) — агент отвечает сам.
+# Приглашения с выбором времени, тестовые, офферы, документы — черновик + уведомление,
+# отправляете вы: hh-agent chats --review. Отказы и автоуведомления — без ответа.
+chats:
+  enabled: true
+  auto_reply: true                   # false — только черновики
+  max_replies_per_run: 10
+  max_chats_scan: 40
+  history_messages: 20
+  delay_seconds: [20, 60]
+  style: "вежливо, коротко, по делу, на «вы»"
+
+browser:
+  profile_dir: .browser-profile      # здесь хранится ваша сессия hh.ru
+  headless_scan: false
+  headless_apply: false              # окно браузера видно во время auto
+  delay_seconds: [2, 5]
+
+db_path: hh_agent.db
