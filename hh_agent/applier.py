@@ -115,10 +115,22 @@ class Applier:
             field.click()
             field.fill("")
             delay = random.uniform(lo, hi)
-            # Таймаут Playwright считается на весь текст: письмо в 900 знаков печатается больше минуты.
-            field.press_sequentially(text, delay=delay, timeout=len(text) * delay * 2 + 30_000)
+            kb = self.page.keyboard
+            # Печатаем в поле с фокусом. Переносы вставляем без нажатия Enter: в окне отклика hh
+            # Enter сворачивает поле письма, и печать зависает.
+            for i, line in enumerate(text.split("\n")):
+                if i:
+                    kb.insert_text("\n")
+                if line:
+                    kb.type(line, delay=delay)
         else:
             field.fill(text)
+        try:
+            ok = field.input_value(timeout=3000).strip() == text.strip()
+        except Exception:
+            ok = False
+        if not ok:  # фокус ушёл или поле перерисовалось — вписываем письмо целиком
+            field.fill(text, timeout=10_000)
 
     def _read_vacancy(self) -> None:
         """Пролистать вакансию, как будто её читают."""
