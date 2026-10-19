@@ -37,21 +37,6 @@ CREATE TABLE IF NOT EXISTS vacancies (
     attempts      INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_status ON vacancies(status);
-CREATE TABLE IF NOT EXISTS chats (
-    chat_id     TEXT PRIMARY KEY,
-    last_msg_id TEXT,          -- последнее обработанное сообщение работодателя
-    -- replied | draft | ignored | closed
-    status      TEXT,
-    action      TEXT,
-    category    TEXT,
-    vacancy     TEXT,
-    employer    TEXT,
-    last_text   TEXT,
-    reply       TEXT,
-    reason      TEXT,
-    sent        INTEGER DEFAULT 0,
-    updated_at  TEXT
-);
 """
 
 COLUMNS = {
@@ -108,31 +93,6 @@ class DB:
         return self.conn.execute(
             "SELECT COUNT(*) FROM vacancies WHERE status IN ('applied', 'unconfirmed') AND applied_at >= ?", (today,)
         ).fetchone()[0]
-
-    # ── чаты ──
-    def chat_handled(self, chat_id: str, msg_id: str) -> bool:
-        r = self.conn.execute("SELECT last_msg_id FROM chats WHERE chat_id=?", (chat_id,)).fetchone()
-        return r is not None and r[0] == msg_id
-
-    def save_chat(self, chat_id: str, msg_id: str, **f: Any) -> None:
-        f = {"last_msg_id": msg_id, "updated_at": datetime.now().isoformat(timespec="seconds"), **f}
-        cols = ", ".join(["chat_id", *f])
-        upd = ", ".join(f"{k}=excluded.{k}" for k in f)
-        self.conn.execute(f"INSERT INTO chats ({cols}) VALUES ({', '.join('?' * (len(f) + 1))}) "
-                          f"ON CONFLICT(chat_id) DO UPDATE SET {upd}", (chat_id, *map(_enc, f.values())))
-        self.conn.commit()
-
-    def update_chat(self, chat_id: str, **f: Any) -> None:
-        f["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        self.conn.execute(f"UPDATE chats SET {', '.join(f'{k}=?' for k in f)} WHERE chat_id=?",
-                          (*map(_enc, f.values()), chat_id))
-        self.conn.commit()
-
-    def chat_drafts(self) -> list[sqlite3.Row]:
-        return self.conn.execute("SELECT * FROM chats WHERE status='draft' ORDER BY updated_at").fetchall()
-
-    def chat_stats(self) -> Iterable[tuple[str, int]]:
-        return self.conn.execute("SELECT status, COUNT(*) FROM chats GROUP BY status").fetchall()
 
     def stats(self) -> Iterable[tuple[str, int]]:
         return self.conn.execute(

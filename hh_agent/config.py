@@ -82,17 +82,6 @@ class Questions(BaseModel):
     facts: str = ""             # факты о вас, которых нет в резюме (зарплата, срок выхода и т.п.)
 
 
-class Chats(BaseModel):
-    """Ответы работодателям в чатах hh.ru."""
-    enabled: bool = True
-    auto_reply: bool = True        # False — агент только готовит черновики, отправляете вы
-    max_replies_per_run: int = 10
-    max_chats_scan: int = 40       # сколько верхних чатов списка просматривать
-    history_messages: int = 20     # сколько последних сообщений чата давать модели
-    delay_seconds: tuple[float, float] = (20, 60)  # пауза после отправленного ответа
-    style: str = "вежливо, коротко, по делу, на «вы»"
-
-
 class Browser(BaseModel):
     profile_dir: str = ".browser-profile"
     headless_scan: bool = False
@@ -106,7 +95,6 @@ class Config(BaseModel):
     analyst: Analyst = Field(default_factory=Analyst)
     apply: Apply = Field(default_factory=Apply)
     questions: Questions = Field(default_factory=Questions)
-    chats: Chats = Field(default_factory=Chats)
     browser: Browser = Field(default_factory=Browser)
     db_path: str = "hh_agent.db"
 

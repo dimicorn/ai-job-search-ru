@@ -16,7 +16,6 @@ from . import analyst as analyst_mod
 from .applier import apply_one
 from .autopilot import run_auto
 from .learning import learn
-from . import chats as chats_mod
 from .browser import LOGIN_URL, SITES, is_logged_in, missing_logins, open_browser, pause, source_of
 from .config import Config, load_config
 from .db import DB, dec_list
@@ -53,7 +52,7 @@ def cmd_scan(cfg: Config, db: DB, analyze: bool = True) -> None:
 
 
 def cmd_analyze(cfg: Config, db: DB) -> None:
-    console.rule("[bold]Оценка (Claude)")
+    console.rule("[bold]Оценка вакансий")
     analyst_mod.analyze_new(cfg, db)
 
 
@@ -68,7 +67,7 @@ def _show(row, idx: int, total: int) -> None:
         f"[bold]Оценка {row['score']}[/] ({row['verdict']})\n"
         + "\n".join(f"  • {r}" for r in dec_list(row["reasons"]))
         + ("\n[red]Настораживает:[/]\n" + "\n".join(f"  • {r}" for r in flags) if flags else "")
-        + (f"\n[yellow]У работодателя тест — возможно, понадобится ручной ввод.[/]" if row["has_test"] else "")
+        + ("\n[yellow]У работодателя тест — возможно, понадобится ручной ввод.[/]" if row["has_test"] else "")
         + (f"\n[yellow]Отложено: {row['error']}[/]" if row["status"] == "manual" and row["error"] else "")
         + f"\n\n[bold]Письмо:[/]\n{row['cover_letter']}"
     )
@@ -166,23 +165,6 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
                     break
 
 
-def cmd_chats(cfg: Config, db: DB, dry_run: bool = False, review: bool = False) -> None:
-    from .browser import CaptchaError
-    with open_browser(cfg, headless=cfg.browser.headless_apply) as (_, page):
-        if not is_logged_in(page):
-            raise SystemExit("Вы не вошли в hh.ru. Выполните в терминале: uv run hh-agent login")
-        try:
-            if review:
-                chats_mod.review_drafts(cfg, db, page)
-            else:
-                chats_mod.process_chats(cfg, db, page, dry_run=dry_run)
-        except CaptchaError:
-            console.print("[red]hh.ru показал капчу — чаты отложены.[/]")
-    drafts = len(db.chat_drafts())
-    if drafts and not review:
-        console.print(f"[yellow]Черновиков ждут вас: {drafts}[/] — uv run hh-agent chats --review")
-
-
 def cmd_requeue(cfg: Config, db: DB, include_tests: bool) -> None:
     """manual → scored. Тесты и анкеты по умолчанию не трогаем: автомат их всё равно не пройдёт."""
     n = 0
@@ -202,9 +184,6 @@ def cmd_stats(cfg: Config, db: DB) -> None:
         t.add_row(s, str(n))
     console.print(t)
     console.print(f"Откликов сегодня: {db.applied_today()}/{cfg.apply.daily_limit}")
-    cs = dict(db.chat_stats())
-    if cs:
-        console.print("Чаты: " + ", ".join(f"{k} {v}" for k, v in cs.items()))
 
 
 def cmd_list(cfg: Config, db: DB, status: str) -> None:
@@ -216,7 +195,7 @@ def cmd_list(cfg: Config, db: DB, status: str) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(prog="hh-agent", description="Полуавтоматические отклики на hh.ru и Хабр Карьере")
+    p = argparse.ArgumentParser(prog="hh-agent", description="Агент откликов на hh.ru и Хабр Карьере")
     p.add_argument("-c", "--config", default="config.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("login", help="войти в hh.ru / Хабр Карьеру (один раз, сессия сохраняется)")
@@ -235,17 +214,14 @@ def main() -> None:
     au.add_argument("--dry-run", action="store_true", help="заполнить формы, но не отправлять (скриншоты в screenshots/)")
     au.add_argument("--limit", type=int, help="максимум откликов за запуск")
     au.add_argument("--min-score", type=int)
-    sub.add_parser("autopilot", help="чаты + scan + оценка + auto + чаты — для запуска по расписанию")
-    ch = sub.add_parser("chats", help="ответить работодателям в чатах")
-    ch.add_argument("--dry-run", action="store_true", help="решить и показать ответы, ничего не отправлять")
-    ch.add_argument("--review", action="store_true", help="пройти черновики, которые агент не отправил сам")
+    sub.add_parser("autopilot", help="scan + оценка + auto — для запуска по расписанию")
     sub.add_parser("learn", help="разобрать debug/ и логи и подстроить агента (обычно — само в конце сессии)")
     sub.add_parser("stats", help="статистика")
     ls = sub.add_parser("list", help="список вакансий по статусу")
     ls.add_argument("status", choices=["new", "filtered", "scored", "skipped", "applied", "unconfirmed", "manual", "error"])
     a = p.parse_args()
 
-    if (a.cmd in ("login", "review", "run") or (a.cmd == "chats" and a.review)) and not sys.stdin.isatty():
+    if a.cmd in ("login", "review", "run") and not sys.stdin.isatty():
         raise SystemExit(
             f"Команда {a.cmd} интерактивная: запустите её в обычном окне терминала "
             "(не через `!` в Claude Code и не из cron)."
@@ -271,13 +247,9 @@ def main() -> None:
         learn(cfg, db)
     elif a.cmd == "auto":
         run_auto(cfg, db, dry_run=a.dry_run, limit=a.limit, min_score=a.min_score)
-    elif a.cmd == "chats":
-        cmd_chats(cfg, db, dry_run=a.dry_run, review=a.review)
     elif a.cmd == "autopilot":
-        cmd_chats(cfg, db)  # сначала ответить тем, кто уже пишет
         cmd_scan(cfg, db)
         run_auto(cfg, db)
-        cmd_chats(cfg, db)
     elif a.cmd == "run":
         cmd_scan(cfg, db)
         try:

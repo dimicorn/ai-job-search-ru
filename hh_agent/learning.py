@@ -30,7 +30,6 @@ from .llm import LimitReached, ask_json
 
 console = Console()
 
-LEARNABLE = ("popup_letter", "letter_toggle", "popup_submit", "informer_letter", "informer_submit")
 # Причины, по которым имеет смысл учить селекторы (тесты и анкеты — не про вёрстку).
 SELECTOR_REASONS = ("поле для письма не найдено", "форма отклика не распознана",
                     "кнопка отправки не найдена", "письмо не отправлено")
@@ -285,7 +284,6 @@ def _session_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
         "captchas": by_kind.get("captcha", 0),
         "scan": [{k: e.get(k) for k in ("search", "total", "added", "filtered")} for e in events if e["kind"] == "scan"],
         "analyze": [{k: e.get(k) for k in ("scored", "passed", "errors", "limit")} for e in events if e["kind"] == "analyze"],
-        "chats": dict(Counter(f"{e.get('category')}→{e.get('status')}" for e in events if e["kind"] == "chat")),
         "auto_end": [{k: e.get(k) for k in ("done", "candidates", "stop_reason")} for e in events if e["kind"] == "auto_end"],
     }
 
@@ -293,7 +291,7 @@ def _session_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
 def _new_log_lines(cfg: Config, store: Store, limit: int = 200) -> list[str]:
     lines: list[str] = []
     offsets = store.data.setdefault("log_offsets", {})
-    for name in ("autopilot.log", "chats.log"):
+    for name in ("autopilot.log",):
         path = cfg.path(f"logs/{name}")
         if not path.exists():
             continue

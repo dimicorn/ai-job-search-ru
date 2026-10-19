@@ -128,7 +128,7 @@ def answer(cfg: Config, questions: list[dict[str, Any]], vacancy: str) -> QAnswe
             f"<vacancy>\n{vacancy}\n</vacancy>\n\n"
             "<fields>\n" + "\n".join(
                 f"[{x['idx']}] type={x['type']}; вопрос: {x['question']}"
-                + (f"; варианты: " + " | ".join(f"{j}) {o}" for j, o in enumerate(x["options"])) if x["options"] else "")
+                + ("; варианты: " + " | ".join(f"{j}) {o}" for j, o in enumerate(x["options"])) if x["options"] else "")
                 + (f"; подсказка: {x['placeholder']}" if x["placeholder"] else "")
                 for x in questions) + "\n</fields>")
     return ask_json(cfg, SYSTEM, user, QAnswers)
