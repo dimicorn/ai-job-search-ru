@@ -140,5 +140,7 @@ launchctl unload ~/Library/LaunchAgents/ru.hh-agent.autopilot.plist    # вык�
 - `submit_mode: manual` — агент только заполняет форму, а «Отправить» вы нажимаете сами.
 - Фильтры проще всего настроить на сайте и вставить URL поиска в `searches[].url`.
 - Профиль браузера нельзя открыть в двух процессах: второй запуск ждёт, пока первый закончит.
+- Пока идёт `scan`, `auto`, `autopilot` или `review`, Mac не засыпает от бездействия (`caffeinate`).
+  Закрытая крышка ноутбука всё равно усыпляет Mac — агент замрёт и продолжит после пробуждения.
 - Вакансия попадает в базу один раз. Чтобы переоценить её после правки резюме:
   `sqlite3 hh_agent.db "update vacancies set status='new' where status='scored'"` и `hh-agent analyze`.

@@ -198,6 +198,16 @@ def cmd_list(cfg: Config, db: DB, status: str) -> None:
     console.print(t)
 
 
+def _keep_awake() -> None:
+    """Не давать Mac засыпать от бездействия, пока идёт запуск (закрытую крышку это не отменяет).
+    caffeinate сам завершится вместе с этим процессом (-w)."""
+    try:
+        subprocess.Popen(["caffeinate", "-i", "-s", "-w", str(os.getpid())],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass  # не macOS — просто работаем дальше
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="hh-agent", description="Агент откликов на hh.ru и Хабр Карьере")
     p.add_argument("-c", "--config", default="config.yaml")
@@ -230,6 +240,8 @@ def main() -> None:
             f"Команда {a.cmd} интерактивная: запустите её в обычном окне терминала "
             "(не через `!` в Claude Code и не из cron)."
         )
+    if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot", "learn"):
+        _keep_awake()
     cfg = load_config(a.config)
     db = DB(cfg.path(cfg.db_path))
     if a.cmd == "login":
