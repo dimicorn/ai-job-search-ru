@@ -305,7 +305,7 @@ class Applier:
 
     # ── отклик ────────────────────────────────────────────────────────
     def apply(self, vid: int, url: str, letter: str, vacancy: str = "") -> tuple[str, str | None]:
-        """Статус: applied | manual | dry_run | unconfirmed (ошибки — исключения).
+        """Статус: applied | already_applied | manual | dry_run | unconfirmed (ошибки — исключения).
 
         Каждый отклик пишется в журнал событий, а выученные селекторы получают +1/−1."""
         self.used = {}
@@ -331,7 +331,7 @@ class Applier:
         page.goto(url, wait_until="domcontentloaded")
         check_captcha(page)
         if page.locator(SEL["responded"]).count():
-            return "applied", "отклик уже был"
+            return "already_applied", "отклик уже был"
         if not page.locator(SEL["respond"]).count():
             return "manual", "на странице нет кнопки отклика"
         self._read_vacancy()
@@ -416,7 +416,7 @@ class Applier:
         if kind == "guest":
             return "manual", "нет входа в Хабр Карьеру — выполните hh-agent login"
         if kind == "applied" or cr.get("response"):
-            return "applied", "отклик уже был"
+            return "already_applied", "отклик уже был"
         if v.get("archived"):
             return "manual", "вакансия в архиве"
         if v.get("externalLink"):

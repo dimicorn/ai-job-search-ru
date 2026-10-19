@@ -16,7 +16,7 @@ from . import analyst as analyst_mod
 from .applier import apply_one
 from .autopilot import run_auto
 from .learning import learn
-from .browser import LOGIN_URL, SITES, is_logged_in, missing_logins, open_browser, pause, source_of
+from .browser import LOGIN_URL, SITES, SiteTabs, is_logged_in, open_browser, pause, source_of
 from .config import Config, load_config
 from .db import DB, dec_list
 from .scout import scan
@@ -29,9 +29,11 @@ LOGIN_HINT = {"hh": "как соискатель", "habr": "через Хабр 
 
 def cmd_login(cfg: Config, db: DB) -> None:
     """Вход на каждый сайт из searches (hh.ru, Хабр Карьера); сессии хранятся в профиле браузера."""
-    with open_browser(cfg) as (_, page):
+    with open_browser(cfg) as (ctx, first):
+        tabs = SiteTabs(ctx, first)
         for src in cfg.sources():
             site = SITES[src]
+            page = tabs(src)
             if is_logged_in(page, src):
                 console.print(f"[green]Вы уже вошли: {site}.[/]")
                 continue
@@ -103,8 +105,9 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
     console.print(f"К просмотру: {len(rows)}. Сегодня уже откликов: {db.applied_today()}/{cfg.apply.daily_limit}")
     keys = "[y] откликнуться  [e] править письмо  [r] переписать с указанием  [o] открыть  [s] пропустить  [l] позже  [q] выход"
     analyst = None
-    with open_browser(cfg) as (_, page):
-        missing = missing_logins(page, (r["url"] for r in rows))
+    with open_browser(cfg) as (ctx, first):
+        tabs = SiteTabs(ctx, first)  # hh.ru и Хабр Карьера — в разных вкладках
+        missing = tabs.missing_logins(r["url"] for r in rows)
         if missing:
             names = ", ".join(SITES[s] for s in missing)
             rows = [r for r in rows if source_of(r["url"]) not in missing]
@@ -141,7 +144,7 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
                         continue
                     db.update(row["id"], cover_letter=letter)
                 elif ch == "o":
-                    page.goto(row["url"], wait_until="domcontentloaded")
+                    tabs(source_of(row["url"])).goto(row["url"], wait_until="domcontentloaded")
                 elif ch == "s":
                     db.update(row["id"], status="skipped")
                     break
@@ -151,15 +154,16 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
                     return
                 elif ch == "y":
                     try:
-                        status, note = apply_one(page, row["url"], letter, cfg, row["id"],
+                        status, note = apply_one(tabs(source_of(row["url"])), row["url"], letter, cfg, row["id"],
                                                  analyst_mod._vacancy_prompt(db.get(row["id"])))
                     except Exception as e:  # вёрстка hh меняется — не роняем всю сессию
                         status, note = "error", f"applier: {e}"
+                    # «Отклик уже был» — applied без applied_at: в дневной лимит не идёт.
                     db.update(
-                        row["id"], status=status, error=note,
+                        row["id"], status="applied" if status == "already_applied" else status, error=note,
                         applied_at=datetime.now().isoformat(timespec="seconds") if status == "applied" else None,
                     )
-                    color = {"applied": "green", "manual": "yellow"}.get(status, "red")
+                    color = {"applied": "green", "already_applied": "dim", "manual": "yellow"}.get(status, "red")
                     console.print(f"[{color}]{status}[/] {note or ''}")
                     pause(cfg.apply.delay_seconds)
                     break

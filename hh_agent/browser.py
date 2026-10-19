@@ -81,6 +81,21 @@ def is_logged_in(page: Page, source: str = "hh") -> bool:
     return st.get("userType") == "applicant"
 
 
-def missing_logins(page: Page, urls: Iterable[str]) -> list[str]:
-    """Сайты из списка вакансий, на которые не выполнен вход."""
-    return [s for s in sorted({source_of(u) for u in urls}) if not is_logged_in(page, s)]
+class SiteTabs:
+    """Отдельная вкладка браузера на каждый сайт: hh.ru — первая вкладка, Хабр Карьера — своя.
+    tabs(source) возвращает вкладку сайта и выводит её на передний план."""
+
+    def __init__(self, ctx: BrowserContext, first: Page):
+        self.ctx = ctx
+        self.pages: dict[str, Page] = {"hh": first}
+
+    def __call__(self, source: str) -> Page:
+        p = self.pages.get(source)
+        if p is None or p.is_closed():
+            p = self.pages[source] = self.ctx.new_page()
+        p.bring_to_front()
+        return p
+
+    def missing_logins(self, urls: Iterable[str]) -> list[str]:
+        return [s for s in sorted({source_of(u) for u in urls}) if not is_logged_in(self(s), s)]
+

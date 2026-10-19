@@ -9,7 +9,7 @@ from rich.console import Console
 
 from . import analyst as analyst_mod
 from .applier import Applier, Mode
-from .browser import SITES, CaptchaError, missing_logins, open_browser, source_of
+from .browser import SITES, CaptchaError, SiteTabs, open_browser, source_of
 from .config import Config
 from .db import DB
 from .events import log_event
@@ -83,15 +83,23 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
     analyst = None
     done = errors = 0
 
-    with open_browser(cfg, headless=cfg.browser.headless_apply) as (_, page):
-        missing = missing_logins(page, (r["url"] for r in rows))
+    with open_browser(cfg, headless=cfg.browser.headless_apply) as (ctx, page):
+        tabs = SiteTabs(ctx, page)  # hh.ru и Хабр Карьера — в разных вкладках
+        missing = tabs.missing_logins(r["url"] for r in rows)
         if missing:
             names = ", ".join(SITES[s] for s in missing)
             rows = [r for r in rows if source_of(r["url"]) not in missing]
             if not rows:
                 raise SystemExit(f"Нет входа: {names}. Выполните в терминале: uv run hh-agent login")
             _log(f"[yellow]Нет входа: {names} — эти вакансии пропускаю.[/] Выполните: uv run hh-agent login")
-        applier = Applier(page, cfg, mode)
+        appliers: dict[str, Applier] = {}
+
+        def applier_for(url: str) -> Applier:
+            src = source_of(url)
+            tab = tabs(src)
+            if src not in appliers:
+                appliers[src] = Applier(tab, cfg, mode)
+            return appliers[src]
 
         for i, row in enumerate(rows):
             if done >= max_n:
@@ -125,7 +133,8 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
 
             _log(f"Откликаюсь: {title}")
             try:
-                status, note = applier.apply(row["id"], row["url"], letter, analyst_mod._vacancy_prompt(row))
+                status, note = applier_for(row["url"]).apply(row["id"], row["url"], letter,
+                                                            analyst_mod._vacancy_prompt(row))
             except CaptchaError:
                 log_event(cfg, "captcha", where="apply", vid=row["id"], done=done)
                 _log("[red]hh.ru показал капчу — останавливаюсь.[/] Пройдите её, запустив review в терминале.")
@@ -144,6 +153,12 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
             now = datetime.now().isoformat(timespec="seconds")
             if status == "dry_run":
                 _log(f"[cyan]dry-run[/] {note}")
+            elif status == "already_applied":
+                # Отклик был раньше: в базе — applied, но без applied_at, чтобы не тратить дневной лимит.
+                # Это не новый отклик — не считаем в лимит запуска и не делаем паузу.
+                db.update(row["id"], status="applied", applied_at=None, error=note)
+                _log("[dim]отклик уже был — пропускаю[/]")
+                continue
             elif status == "applied":
                 db.update(row["id"], status="applied", applied_at=now, error=note)
                 _log(f"[green]✓ отклик отправлен[/]{f' ({note})' if note else ''}")
