@@ -52,7 +52,7 @@ class AutoApply(BaseModel):
     min_score: int = 75                       # откликаться только на вакансии с баллом не ниже
     max_per_run: int = 10                     # максимум откликов за один запуск
     skip_employer_tests: bool = False         # True — вакансии с тестом сразу в manual, без попыток
-    active_hours: tuple[int, int] = (9, 21)   # работать только в эти часы (локальное время)
+    active_hours: tuple[int, int] = (8, 23)   # работать только в эти часы (локальное время)
     weekdays_only: bool = False
     read_seconds: tuple[float, float] = (8, 20)       # «читаем» вакансию перед откликом
     action_seconds: tuple[float, float] = (0.8, 2.5)  # пауза между кликами внутри формы

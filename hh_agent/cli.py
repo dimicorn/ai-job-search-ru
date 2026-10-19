@@ -183,11 +183,52 @@ def cmd_requeue(cfg: Config, db: DB, include_tests: bool) -> None:
 
 
 def cmd_stats(cfg: Config, db: DB) -> None:
-    t = Table("статус", "кол-во")
-    for s, n in db.stats():
-        t.add_row(s, str(n))
+    """Сводка за сегодня, 7 и 30 дней (включая сегодня) и текущая очередь."""
+    from datetime import date, timedelta
+    from .events import read_events
+
+    today = date.today()
+    periods = {"сегодня": today.isoformat(),
+               "7 дней": (today - timedelta(days=6)).isoformat(),
+               "30 дней": (today - timedelta(days=29)).isoformat()}
+    rows = db.conn.execute("SELECT url, status, score, found_at, applied_at FROM vacancies").fetchall()
+    events = read_events(cfg)
+    sites = sorted({source_of(r["url"]) for r in rows}) or ["hh"]
+    passing = cfg.analyst.min_score
+
+    def count(since: str, pred) -> int:
+        return sum(1 for r in rows if pred(r, since))
+
+    found = lambda r, d: (r["found_at"] or "") >= d
+    sent = lambda src: (lambda r, d: r["status"] == "applied" and (r["applied_at"] or "") >= d
+                        and source_of(r["url"]) == src)
+    metrics = [
+        ("Найдено вакансий", lambda d: count(d, found)),
+        ("  прошли фильтры", lambda d: count(d, lambda r, d: found(r, d) and r["status"] != "filtered")),
+        (f"  подходящих (балл ≥ {passing})", lambda d: count(d, lambda r, d: found(r, d) and (r["score"] or 0) >= passing)),
+        ("Откликов отправлено", lambda d: sum(count(d, sent(src)) for src in sites)),
+        *[(f"  {SITES.get(src, src)}", (lambda src: lambda d: count(d, sent(src)))(src)) for src in sites],
+        ("Отправка не подтвердилась", lambda d: count(d, lambda r, d: r["status"] == "unconfirmed"
+                                                     and (r["applied_at"] or "") >= d)),
+        ("Отложено в manual", lambda d: count(d, lambda r, d: found(r, d) and r["status"] == "manual")),
+        # Каждая капча — одна запись: появление (без solved) или, при ожидании без id вакансии, «пройдена».
+        ("Капч", lambda d: sum(1 for e in events if e["kind"] == "captcha" and e["ts"] >= d
+                               and ("solved" not in e or (e.get("solved") and "vid" not in e)))),
+    ]
+    t = Table("", *periods)
+    for name, fn in metrics:
+        t.add_row(name, *(str(fn(d)) for d in periods.values()),
+                  style="bold" if not name.startswith(" ") else None)
     console.print(t)
-    console.print(f"Откликов сегодня: {db.applied_today()}/{cfg.apply.daily_limit}")
+
+    queue = db.by_status("scored", min_score=cfg.apply.auto.min_score)
+    by_site = {src: sum(source_of(r["url"]) == src for r in queue) for src in sites}
+    console.print(f"Сегодня откликов: {db.applied_today()}/{cfg.apply.daily_limit}. "
+                  f"В очереди на автоотклик (балл ≥ {cfg.apply.auto.min_score}): {len(queue)}"
+                  + (" — " + ", ".join(f"{SITES.get(s, s)} {n}" for s, n in by_site.items()) if len(sites) > 1 else ""))
+    manual = len(db.by_status("manual"))
+    if manual:
+        console.print(f"Ждут вас в manual: {manual} (uv run hh-agent review --manual)")
 
 
 def cmd_list(cfg: Config, db: DB, status: str) -> None:
@@ -231,7 +272,7 @@ def main() -> None:
     sub.add_parser("autopilot", help="scan + оценка + auto — для запуска по расписанию")
     rp = sub.add_parser("report", help="сводка и рекомендации по журналу событий за N дней (через LLM)")
     rp.add_argument("--days", type=int, default=7)
-    sub.add_parser("stats", help="статистика")
+    sub.add_parser("stats", help="статистика за сегодня, 7 и 30 дней")
     ls = sub.add_parser("list", help="список вакансий по статусу")
     ls.add_argument("status", choices=["new", "filtered", "scored", "skipped", "applied", "unconfirmed", "manual", "error"])
     a = p.parse_args()
