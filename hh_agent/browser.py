@@ -7,8 +7,9 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from typing import Any, Iterable, Iterator
+from typing import Any
 
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 

@@ -223,3 +223,12 @@ uv run hh-agent recruiters             # пройти опросы сейчас
   на первой странице, где нет ни одной новой вакансии.
 - Вакансия попадает в базу один раз. Чтобы переоценить её после правки резюме:
   `sqlite3 hh_agent.db "update vacancies set status='new' where status='scored'"` и `hh-agent analyze`.
+
+## Разработка
+
+- Линтер — ruff (правила в `pyproject.toml`): `uv run ruff check .`, автоисправление — `--fix`.
+  На каждый push в `main` и pull request проверка идёт в GitHub Actions (`.github/workflows/lint.yml`).
+- CHANGELOG.md собирает git-cliff по `cliff.toml` из истории коммитов: при push тега вида `v0.2.0`
+  (`git tag v0.2.0 && git push origin v0.2.0`) workflow `changelog.yml` обновляет файл и коммитит его
+  в `main`. Группы («Added», «Fixed», «Removed», «Changed») — по первому слову сообщения коммита.
+  Посмотреть заранее: `uvx git-cliff --unreleased`.

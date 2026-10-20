@@ -14,13 +14,13 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import analyst as analyst_mod
+from . import recruiters
 from .applier import apply_one
 from .autopilot import run_auto
-from . import recruiters
-from .learning import learn, report
 from .browser import LOGIN_URL, SITES, SiteTabs, is_logged_in, open_browser, pause, source_of
 from .config import Config, load_config
 from .db import DB, dec_list
+from .learning import learn, report
 from .scout import scan
 
 console = Console()
@@ -189,6 +189,7 @@ def cmd_requeue(cfg: Config, db: DB, include_tests: bool) -> None:
 def cmd_stats(cfg: Config, db: DB) -> None:
     """Сводка за сегодня, 7 и 30 дней (включая сегодня) и текущая очередь."""
     from datetime import date, timedelta
+
     from .events import read_events
 
     today = date.today()
@@ -211,7 +212,7 @@ def cmd_stats(cfg: Config, db: DB) -> None:
         ("  прошли фильтры", lambda d: count(d, lambda r, d: found(r, d) and r["status"] != "filtered")),
         (f"  подходящих (балл ≥ {passing})", lambda d: count(d, lambda r, d: found(r, d) and (r["score"] or 0) >= passing)),
         ("Откликов отправлено", lambda d: sum(count(d, sent(src)) for src in sites)),
-        *[(f"  {SITES.get(src, src)}", (lambda src: lambda d: count(d, sent(src)))(src)) for src in sites],
+        *[(f"  {SITES.get(src, src)}", (lambda src: lambda d: count(d, sent(src)))(src)) for src in sites],  # noqa: B023 — src привязан вызовом
         ("Отправка не подтвердилась", lambda d: count(d, lambda r, d: r["status"] == "unconfirmed"
                                                      and (r["applied_at"] or "") >= d)),
         ("Отложено в manual", lambda d: count(d, lambda r, d: found(r, d) and r["status"] == "manual")),
@@ -231,7 +232,7 @@ def cmd_stats(cfg: Config, db: DB) -> None:
     metrics += [
         ("LLM-вызовов", lambda d: sum(1 for e in llm if e["ts"] >= d)),
         ("Токенов (вход + выход)", lambda d: k(sum(tok(e) for e in llm if e["ts"] >= d))),
-        *[(f"  {name}", (lambda p: lambda d: k(sum(tok(e) for e in llm if e["ts"] >= d and e.get("purpose") == p)))(p))
+        *[(f"  {name}", (lambda p: lambda d: k(sum(tok(e) for e in llm if e["ts"] >= d and e.get("purpose") == p)))(p))  # noqa: B023
           for p, name in purposes.items() if any(e.get("purpose") == p for e in llm)],
         ("  из них из кеша", lambda d: k(sum(e.get("cached") or 0 for e in llm if e["ts"] >= d))),
         ("Токенов на отклик", per_apply),

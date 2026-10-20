@@ -1,0 +1,39 @@
+# Конфиг git-cliff: CHANGELOG.md из истории коммитов (.github/workflows/changelog.yml, на тег vX.Y.Z).
+# Коммиты здесь не Conventional Commits, а фразы в повелительном наклонении («Add …», «Fix …»),
+# поэтому группа выбирается по первому слову.
+
+[changelog]
+header = """
+# Changelog\n
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | trim }} ({{ commit.id | truncate(length=7, end="") }})\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = false
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+  { message = "^Update changelog", skip = true },
+  { message = "^Merge ", skip = true },
+  { message = "^(Add|Support|Initial commit)", group = "<!-- 0 -->Added" },
+  { message = "^Fix", group = "<!-- 2 -->Fixed" },
+  { message = "^Remove", group = "<!-- 3 -->Removed" },
+  { message = ".*", group = "<!-- 1 -->Changed" },
+]
+filter_commits = false
+tag_pattern = "v[0-9].*"
+sort_commits = "newest"

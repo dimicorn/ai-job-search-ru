@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from playwright.sync_api import Page, TimeoutError as PWTimeout
+from playwright.sync_api import Page
+from playwright.sync_api import TimeoutError as PWTimeout
 from rich.console import Console
-
 from rich.panel import Panel
 
 from . import questions

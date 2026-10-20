@@ -20,7 +20,7 @@ import asyncio
 import random
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import unquote
 
@@ -28,8 +28,8 @@ from playwright.sync_api import Page
 from pydantic import BaseModel
 from rich.console import Console
 
-from .browser import HH, CaptchaError, attach, check_captcha, notify, open_browser
 from . import faq
+from .browser import HH, CaptchaError, attach, check_captcha, notify, open_browser
 from .config import Config
 from .db import DB
 from .events import log_event
@@ -400,7 +400,7 @@ def _unanswered(msgs: list) -> list:
     """Сообщения бота после моего последнего ответа, кроме списков вакансий: среди них может быть
     вопрос, оставшийся без ответа (за ним пришли список или уведомление)."""
     i = max((k for k, m in enumerate(msgs) if m.out), default=-1)
-    fresh = datetime.now(timezone.utc) - PENDING_AGE
+    fresh = datetime.now(UTC) - PENDING_AGE
     return [m for m in msgs[i + 1:] if not m.out and _choice(m) is None and m.date > fresh]
 
 
@@ -444,7 +444,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
         last = msgs[-1]
         state = db.tg_dialog(bot)
         if last.out:  # ждём бота
-            fresh = datetime.now(timezone.utc) - last.date <= STALE
+            fresh = datetime.now(UTC) - last.date <= STALE
             if fresh and not dry_run and _wait_bot(client, entity, t.wait_reply_seconds):
                 continue
             # Бот молчит после нашего сообщения: опрос мог закончиться без его ответа — идём дальше.

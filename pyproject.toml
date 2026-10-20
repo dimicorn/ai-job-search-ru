@@ -18,3 +18,16 @@ hh-agent = "hh_agent.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["ruff>=0.15"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# E501: длинные строки допустимы; E731: короткие lambda в таблицах метрик;
+# B904: raise SystemExit с понятным сообщением вместо цепочки исключений.
+ignore = ["E501", "E731", "B904"]

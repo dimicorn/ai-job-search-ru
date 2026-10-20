@@ -17,7 +17,7 @@ class Search(BaseModel):
     max_pages: int = 3
 
     @model_validator(mode="after")
-    def _url_or_params(self) -> "Search":
+    def _url_or_params(self) -> Search:
         if not self.url and not self.params:
             raise ValueError(f"search '{self.name}': нужен url или params")
         if self.source is None:
