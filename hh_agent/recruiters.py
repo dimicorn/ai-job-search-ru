@@ -245,6 +245,14 @@ def _messages(client, entity, limit: int) -> list:
     return [m for m in reversed(client.get_messages(entity, limit=limit)) if not isinstance(m, MessageService)]
 
 
+def _idle(seconds: float) -> None:
+    """Пауза, во время которой Telethon работает: синхронный клиент обслуживает соединение (ping, ответы
+    сервера, «печатает…») только внутри своего цикла событий. После time.sleep дольше минуты Telegram
+    рвёт соединение, и Telethon сыплет «Server replied with a wrong session ID»."""
+    if seconds > 0:
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(seconds))
+
+
 def _snapshot(client, entity) -> list[tuple]:
     return [(m.id, m.edit_date, m.message, len(_buttons(m))) for m in _messages(client, entity, 8)]
 
@@ -255,11 +263,11 @@ def _wait_bot(client, entity, timeout: float) -> bool:
     before = _snapshot(client, entity)
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
-        time.sleep(3)
+        _idle(3)
         now = _snapshot(client, entity)
         if now != before:
             while True:
-                time.sleep(5)
+                _idle(5)
                 later = _snapshot(client, entity)
                 if later == now:
                     return True
@@ -478,7 +486,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             log_event(cfg, "recruiter", bot=bot, action="choose", vacancy=title, dry_run=dry_run)
             if dry_run:
                 return "active"
-            time.sleep(random.uniform(*t.reply_seconds))
+            _idle(random.uniform(*t.reply_seconds))
             if title:  # до нажатия: бот правит это же сообщение («Спасибо за выбор вакансии!»)
                 db.save_tg_survey(bot, _norm(title), "active", vid)
                 db.save_tg_dialog(bot, status="active", survey=title, vacancy_id=vid, last_seen_id=last.id)
@@ -573,10 +581,10 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
         if pause > 0:
             console.print(f"    [dim]отвечу через {pause:.0f} с[/]")
             if step.action == "reply":
-                with client.action(entity, "typing"):  # в чате бота — «печатает…»
-                    time.sleep(pause)
+                with client.action(entity, "typing"):  # в чате бота — «печатает…», пока идёт пауза
+                    _idle(pause)
             else:
-                time.sleep(pause)
+                _idle(pause)
         db.save_tg_dialog(bot, status="active", last_seen_id=last.id)  # до ответа: правку сообщения ботом видно по времени
         if step.action == "button":
             try:
