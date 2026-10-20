@@ -1,7 +1,6 @@
 """Общий браузер: persistent-профиль Chromium с вашими сессиями hh.ru и Хабр Карьеры."""
 from __future__ import annotations
 
-import fcntl
 import random
 import socket
 import subprocess
@@ -10,6 +9,11 @@ import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any
+
+try:
+    import fcntl  # блокировка профиля браузера; есть только на macOS и Linux
+except ImportError:
+    raise SystemExit("hh-agent работает на macOS и Linux; на Windows запускайте его в WSL.")
 
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 
