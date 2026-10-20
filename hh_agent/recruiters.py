@@ -77,6 +77,7 @@ SYSTEM = """Ты проходишь за соискателя опрос AI-ре
 - done — опрос по вакансии закончен: бот поблагодарил и больше ничего не спрашивает, сообщил,
   что передаст ответы рекрутеру, или это отказ.
 - ignore — уведомление вне опроса, ответа не ждёт: статус рассмотрения изменён, рассылка вакансий.
+  Но если выше, после моего последнего ответа, остался вопрос бота без ответа — ответь на него (reply).
 - human — нужен человек: вопрос о личных обстоятельствах, которых нет ни в резюме, ни в фактах
   (в missing_fact — какой факт нужен, кратко); выбор даты и времени встречи, тестовое задание
   по ссылке, голосовой или видеоответ, файл, документы, паспортные данные, коды, пароли;
@@ -268,13 +269,17 @@ def _vacancy_context(cfg: Config, db: DB, vid: int | None, survey: str | None) -
             + "\n".join(f"- {r['title']} ({r['company']})" for r in recent) if recent else "неизвестна")
 
 
-def _decide(cfg: Config, db: DB, msgs: list, vid: int | None, survey: str | None) -> Step:
+def _decide(cfg: Config, db: DB, msgs: list, vid: int | None, survey: str | None, hanging=None) -> Step:
     system = SYSTEM.format(consent=CONSENT if cfg.telegram.accept_consent else "", style=ANSWER_STYLE)
     user = (f"<resume>\n{cfg.resume_text().strip()}\n</resume>\n\n"
             f"<facts>\n{cfg.questions.facts.strip() or '—'}\n</facts>\n\n"
             f"<preferences>\n{cfg.analyst.preferences.strip() or '—'}\n</preferences>\n\n"
             f"<vacancy>\n{_vacancy_context(cfg, db, vid, survey)}\n</vacancy>\n\n"
-            "<chat>\n" + "\n".join(_fmt(m) for m in msgs) + "\n</chat>")
+            "<chat>\n" + "\n".join(_fmt(m) for m in msgs) + "\n</chat>"
+            + ("\n\nПоследним пришёл список вакансий, но выше, после моего последнего ответа, бот писал:\n"
+               "<unanswered>\n" + "\n".join(_fmt(m) for m in _unanswered(msgs)) + "\n</unanswered>\n"
+               "Если среди этого есть вопрос без ответа — ответь на него (reply); кнопки списка не нажимай. "
+               "Если вопросов нет — ignore." if hanging is not None else ""))
     return ask_json(cfg, system, user, Step, purpose="recruiter")
 
 
@@ -343,6 +348,17 @@ def _want_switch(cfg: Config, db: DB, client, bot: str, entity) -> bool:
     return any(_norm(r["title"]) not in surveys and (r["applied_at"] or "") > since for r in _company_applies(cfg, db))
 
 
+PENDING_AGE = timedelta(days=3)  # вопрос бота старше этого без ответа уже не поднимаем
+
+
+def _unanswered(msgs: list) -> list:
+    """Сообщения бота после моего последнего ответа, кроме списков вакансий: среди них может быть
+    вопрос, оставшийся без ответа (за ним пришли список или уведомление)."""
+    i = max((k for k, m in enumerate(msgs) if m.out), default=-1)
+    fresh = datetime.now(timezone.utc) - PENDING_AGE
+    return [m for m in msgs[i + 1:] if not m.out and _choice(m) is None and m.date > fresh]
+
+
 def _say(bot: str, m, what: str) -> None:
     console.print(f"  @{bot}: {' '.join((m.message or '').split())[:160]}\n    → {what}", markup=False)
 
@@ -352,6 +368,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
     t = cfg.telegram
     switch_cmd: str | None = None
     pages: set[tuple] = set()  # страницы списка вакансий, уже просмотренные в этом запуске
+    pending_checked = retried = False
     for _ in range(t.max_turns):
         msgs = _messages(client, entity, 30)
         if not msgs:
@@ -366,7 +383,15 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             continue
 
         opts = _choice(last)
-        if opts is not None:  # выбор вакансии — решает код, не модель
+        hanging = None  # вопрос бота выше списка вакансий, оставшийся без ответа
+        if opts is not None and not pending_checked:
+            pending_checked = True
+            if not _handled(state, last) or (state and state["status"] == "human"):
+                rest = _unanswered(msgs)
+                hanging = next((m for m in reversed(rest) if "?" in (m.message or "")), rest[-1] if rest else None)
+        if opts is not None and hanging is None:  # выбор вакансии — решает код, не модель
+            if state and state["status"] == "human" and _handled(state, last):
+                return "human"  # опрос ждёт вашего ответа — новую вакансию не начинаем
             surveys = db.tg_surveys(bot)
             todo = [(i, title) for i, title in opts if _norm(title) not in surveys]
             page = tuple(title for _, title in opts)
@@ -399,25 +424,31 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             _wait_bot(client, entity, t.wait_reply_seconds)
             continue
 
-        if _handled(state, last):
-            if state["status"] in ("done", None) and not dry_run and _want_switch(cfg, db, client, bot, entity):
-                switch_cmd = switch_cmd or _switch_command(client, entity)
-                if switch_cmd:
-                    console.print(f"  @{bot}: есть отклики без опроса — {switch_cmd}")
-                    db.save_tg_dialog(bot, switched_at=datetime.now().isoformat(timespec="seconds"))
-                    client.send_message(entity, switch_cmd)
-                    _wait_bot(client, entity, t.wait_reply_seconds)
-                    continue
-            return state["status"] or "done"
+        if hanging is None and _handled(state, last):
+            if state["status"] == "human" and not retried:
+                retried = True  # факты могли пополниться — пробуем ответить ещё раз
+            else:
+                if state["status"] in ("done", None) and not dry_run and _want_switch(cfg, db, client, bot, entity):
+                    switch_cmd = switch_cmd or _switch_command(client, entity)
+                    if switch_cmd:
+                        console.print(f"  @{bot}: есть отклики без опроса — {switch_cmd}")
+                        db.save_tg_dialog(bot, switched_at=datetime.now().isoformat(timespec="seconds"))
+                        client.send_message(entity, switch_cmd)
+                        _wait_bot(client, entity, t.wait_reply_seconds)
+                        continue
+                return state["status"] or "done"
 
+        target = hanging or last  # на какое сообщение бота отвечаем
         survey = state["survey"] if state else None
         vid = state["vacancy_id"] if state else None
         try:
-            step = _decide(cfg, db, msgs, vid, survey)
+            step = _decide(cfg, db, msgs, vid, survey, hanging=hanging)
         except LimitReached as e:
             console.print(f"  [yellow]Лимит LLM — продолжу в следующий раз: {e}[/]")
             return "active"
         btns = _buttons(last)
+        if hanging is not None and step.action in ("button", "wait"):
+            step.action = "ignore"  # кнопки последнего сообщения — это список вакансий, его выбирает код
         if step.action == "button":
             kind = _btn_kind(btns[step.button]) if 0 <= step.button < len(btns) else "bad"
             if kind in ("bad", "other", "geo") or (kind == "phone" and not t.share_contact):
@@ -425,24 +456,29 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 step.reason = {"bad": "модель выбрала несуществующую кнопку", "other": "кнопка открывает ссылку или приложение",
                                "geo": "бот просит геопозицию",
                                "phone": "бот просит номер телефона (telegram.share_contact: false)"}[kind]
-        _say(bot, last, f"{step.action}: " + (step.text if step.action == "reply"
-                                              else f"[{btns[step.button].text}]" if step.action == "button"
-                                              else step.reason))
-        log_event(cfg, "recruiter", bot=bot, action=step.action, vacancy=survey or vid, dry_run=dry_run)
+        _say(bot, target, f"{step.action}: " + (step.text if step.action == "reply"
+                                                else f"[{btns[step.button].text}]" if step.action == "button"
+                                                else step.reason))
+        log_event(cfg, "recruiter", bot=bot, action=step.action, vacancy=survey or vid, hanging=hanging is not None,
+                  dry_run=dry_run)
         if dry_run:
             return "active"
         if step.action in ("done", "ignore"):
             if step.action == "done" and survey:
                 db.save_tg_survey(bot, _norm(survey), "done", vid)
-            status = "done" if step.action == "done" or not state else state["status"]
+            status = ("done" if step.action == "done" or not state
+                      else "active" if state["status"] == "human" and hanging is None else state["status"])
             db.save_tg_dialog(bot, status=status, last_seen_id=last.id)
-            continue  # следующий круг: сменить вакансию, если есть отклики без опроса
+            continue  # следующий круг: выбрать или сменить вакансию, если есть отклики без опроса
         if step.action == "human":
+            note = step.missing_fact or step.reason
+            again = bool(state) and state["status"] == "human" and state["last_seen_id"] >= target.id
             if survey:
                 db.save_tg_survey(bot, _norm(survey), "human", vid)
-            db.save_tg_dialog(bot, status="human", last_seen_id=last.id, note=step.missing_fact or step.reason)
-            _log_human(cfg, bot, last.message or "", step)
-            notify("hh-agent: ответьте боту в Telegram", f"@{bot}: {step.missing_fact or step.reason}")
+            db.save_tg_dialog(bot, status="human", last_seen_id=last.id, note=note)
+            if not again:  # тот же вопрос уже передан вам — второй раз не уведомляем
+                _log_human(cfg, bot, target.message or "", step)
+                notify("hh-agent: ответьте боту в Telegram", f"@{bot}: {note}")
             return "human"
         if step.action == "wait":
             db.save_tg_dialog(bot, status="active", last_seen_id=last.id)
@@ -457,7 +493,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             except Exception as e:
                 console.print(f"    [dim]кнопка: {e}[/]")
         else:
-            client.send_message(entity, step.text)
+            client.send_message(entity, step.text, reply_to=hanging.id if hanging is not None else None)
         _wait_bot(client, entity, t.wait_reply_seconds)
     return "active"
 
