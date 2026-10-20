@@ -15,12 +15,17 @@
 ## Установка
 
 ```bash
-cd ~/hh-agent
-uv sync && uv run playwright install chromium
-uv run hh-agent setup      # создаст config.yaml, resume.md, faq.yaml и спросит, какую LLM использовать
+git clone git@github.com:dimicorn/job_search_agent.git hh-agent && cd hh-agent
+./setup.sh
 ```
 
-При первом запуске любой команды без `config.yaml` мастер настройки откроется сам.
+`setup.sh` проводит по шагам: ставит [uv](https://docs.astral.sh/uv/) (если его нет), зависимости
+и Chromium для Playwright, запускает мастер `hh-agent setup` (создаст `config.yaml`, `resume.md`,
+`faq.yaml` и спросит основную и запасную LLM), предлагает войти на hh.ru, Хабр Карьеру и в Telegram
+и включить ежедневный autopilot. Повторный запуск безопасен: готовое он не трогает.
+
+Вручную то же самое: `uv sync && uv run playwright install chromium && uv run hh-agent setup`,
+затем `uv run hh-agent login`. При первом запуске любой команды без `config.yaml` мастер откроется сам.
 
 ### Какая LLM
 
@@ -122,15 +127,15 @@ uv run hh-agent autopilot        # поиск, оценка, отклики и T
 
 ### Каждый день по расписанию
 
-`launchd/ru.hh-agent.autopilot.plist` запускает `autopilot` каждый день в 10:00. Если Mac
-в это время спал, задача запустится при пробуждении. При закрытой крышке не запускается.
-Лог пишется в `logs/autopilot.log`.
+На macOS `autopilot` можно запускать каждый день через launchd (шаблон —
+`launchd/ru.hh-agent.autopilot.plist`). Если Mac в это время спал, задача запустится при
+пробуждении. При закрытой крышке не запускается. Лог пишется в `logs/autopilot.log`.
+
+Включается на последнем шаге `./setup.sh` (он спросит час). Дальше:
 
 ```bash
-sed "s|__HOME__|$HOME|g" launchd/ru.hh-agent.autopilot.plist > ~/Library/LaunchAgents/ru.hh-agent.autopilot.plist
-launchctl load ~/Library/LaunchAgents/ru.hh-agent.autopilot.plist      # включить
-launchctl start ru.hh-agent.autopilot                                   # запустить прямо сейчас
-launchctl unload ~/Library/LaunchAgents/ru.hh-agent.autopilot.plist    # выключить
+launchctl start ru.hh-agent.autopilot                                  # запустить прямо сейчас
+launchctl unload ~/Library/LaunchAgents/ru.hh-agent.autopilot.plist   # выключить
 ```
 
 Пока autopilot работает (около 2–3 часов), не запускайте `review`: профиль браузера

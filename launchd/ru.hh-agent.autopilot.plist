@@ -1,26 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Шаблон: __HOME__ подставляется при установке (см. README). -->
+<!-- Шаблон: __UV__, __DIR__, __HOUR__ и __HOME__ подставляет ./setup.sh (см. README). -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>ru.hh-agent.autopilot</string>
 
-    <!-- Каждый день в 10:00: поиск → оценка (Codex) → до 20 автооткликов с паузами.
+    <!-- Каждый день в __HOUR__:00: поиск → оценка (Codex) → до 20 автооткликов с паузами.
          Если Mac в это время спал, launchd запустит задачу при пробуждении. -->
     <key>ProgramArguments</key>
     <array>
-        <string>__HOME__/.local/bin/uv</string>
+        <string>__UV__</string>
         <string>run</string>
         <string>hh-agent</string>
         <string>autopilot</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>__HOME__/hh-agent</string>
+    <string>__DIR__</string>
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>10</integer>
+        <integer>__HOUR__</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
@@ -37,9 +37,9 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>__HOME__/hh-agent/logs/autopilot.log</string>
+    <string>__DIR__/logs/autopilot.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME__/hh-agent/logs/autopilot.log</string>
+    <string>__DIR__/logs/autopilot.log</string>
     <key>RunAtLoad</key>
     <false/>
 </dict>
