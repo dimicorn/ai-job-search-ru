@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import random
 import re
 import time
@@ -185,6 +186,21 @@ def links_from_hh(cfg: Config, db: DB, page: Page, max_chats: int = 60) -> int:
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
+TG_LOCK = ".telegram.lock"
+
+
+def session_lock(cfg: Config):
+    """Захватить Telegram-сессию для этого процесса; None — её держит другой запуск hh-agent.
+    Два одновременных подключения с одной сессией Telegram рвёт («wrong session ID»)."""
+    f = open(cfg.path(TG_LOCK), "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.close()
+        return None
+    return f  # блокировка держится, пока файл открыт
+
+
 def _client(cfg: Config):
     from telethon.sync import TelegramClient
 
@@ -197,11 +213,15 @@ def _client(cfg: Config):
 
 def login(cfg: Config) -> None:
     """Интерактивный вход в Telegram: номер, код из приложения, пароль 2FA. Сессия — в telegram.session."""
-    client = _client(cfg)
-    client.start()
-    me = client.get_me()
-    console.print(f"[green]Telegram: вошли как {me.first_name} (@{me.username or '—'}).[/]")
-    client.disconnect()
+    lock = session_lock(cfg)
+    if lock is None:
+        raise SystemExit("Telegram-сессия занята другим запуском hh-agent (autopilot, recruiters) — дождитесь его конца.")
+    with lock:
+        client = _client(cfg)
+        client.start()
+        me = client.get_me()
+        console.print(f"[green]Telegram: вошли как {me.first_name} (@{me.username or '—'}).[/]")
+        client.disconnect()
 
 
 def _buttons(m) -> list[Any]:
@@ -680,6 +700,10 @@ def run(cfg: Config, db: DB, dry_run: bool = False, cdp_port: int | None = None)
     if not (t.api_id and t.api_hash):
         console.print("[yellow]Telegram: задайте telegram.api_id и api_hash в config.yaml, затем uv run hh-agent login.[/]")
         return
+    lock = session_lock(cfg)
+    if lock is None:
+        console.print("[yellow]Telegram-сессия занята другим запуском hh-agent — опросы пройду в следующий раз.[/]")
+        return
     client = _client(cfg)
     client.connect()
     try:
@@ -709,3 +733,4 @@ def run(cfg: Config, db: DB, dry_run: bool = False, cdp_port: int | None = None)
             log_event(cfg, "recruiter_check", bot=bot, status=status, dry_run=dry_run)  # и когда делать было нечего
     finally:
         client.disconnect()
+        lock.close()
