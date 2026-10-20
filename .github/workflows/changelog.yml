@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read # git-cliff с GITHUB_REPO читает PR через API; без этого 403
     steps:
       - name: Checkout
         uses: actions/checkout@v4
