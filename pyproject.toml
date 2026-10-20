@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "rich>=13.7",
+    "telethon>=1.36",
 ]
 
 [project.scripts]

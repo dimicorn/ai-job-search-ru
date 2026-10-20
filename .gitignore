@@ -10,3 +10,4 @@ logs/
 learned.json
 .DS_Store
 .hh-agent.lock
+.telegram*

@@ -114,6 +114,19 @@ questions:
     # Нужна ли ИТ-аккредитация работодателя:
     # Почему ищу работу сейчас:
 
+# ── AI-рекрутеры в Telegram ─────────────────────────────────────────
+# После откликов (например, в Сбер) бот-рекрутер в Telegram задаёт вопросы. В конце auto/autopilot
+# агент ищет ссылку на бота в чате вакансии на hh и отвечает боту от вашего аккаунта (Telethon).
+# Ключи: my.telegram.org → API development tools. Вход: uv run hh-agent login.
+telegram:
+  enabled: false
+  api_id: null
+  api_hash: null
+  companies: ["Сбер", "Sber"]       # у откликов в эти компании искать ссылку на бота в чате hh
+  bots: []                          # боты, которые пишут сами, без ссылки (username без @)
+  share_contact: false              # true — на кнопку «поделиться номером» отдавать свой телефон
+  accept_consent: true              # принимать согласие на обработку персональных данных для подбора
+
 browser:
   profile_dir: .browser-profile      # здесь хранится ваша сессия hh.ru
   headless_scan: false

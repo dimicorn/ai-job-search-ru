@@ -87,6 +87,22 @@ class Questions(BaseModel):
     facts: str = ""             # факты о вас, которых нет в резюме (зарплата, срок выхода и т.п.)
 
 
+class Telegram(BaseModel):
+    """AI-рекрутеры в Telegram (например, у Сбера): после откликов агент отвечает на их вопросы."""
+    enabled: bool = False
+    api_id: int | None = None                 # с my.telegram.org → API development tools
+    api_hash: str | None = None
+    session: str = ".telegram"                # файл сессии Telethon (.session), как профиль браузера
+    companies: list[str] = Field(default_factory=lambda: ["Сбер", "Sber"])  # у откликов сюда ищем ссылку на бота в чате hh
+    bots: list[str] = Field(default_factory=list)  # боты, которые пишут сами (username без @)
+    check_days: int = 7                       # искать ссылку в чатах hh для откликов за столько дней
+    max_turns: int = 40                       # ходов в одном диалоге за запуск
+    reply_seconds: tuple[float, float] = (6, 20)  # «думаем и печатаем» перед ответом
+    wait_reply_seconds: int = 120             # сколько ждать следующего сообщения бота
+    share_contact: bool = False               # true — на просьбу «поделиться контактом» отдавать свой номер
+    accept_consent: bool = True               # принимать согласие на обработку персональных данных для подбора
+
+
 class Browser(BaseModel):
     profile_dir: str = ".browser-profile"
     headless_scan: bool = False
@@ -101,6 +117,7 @@ class Config(BaseModel):
     apply: Apply = Field(default_factory=Apply)
     questions: Questions = Field(default_factory=Questions)
     browser: Browser = Field(default_factory=Browser)
+    telegram: Telegram = Field(default_factory=Telegram)
     db_path: str = "hh_agent.db"
 
     base_dir: Path = Path(".")

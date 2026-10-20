@@ -15,6 +15,7 @@ from .config import Config
 from .db import DB
 from .events import log_event
 from .learning import Store, learn
+from . import recruiters
 
 console = Console()
 
@@ -131,6 +132,7 @@ def run_auto(cfg: Config, db: DB, dry_run: bool = False, limit: int | None = Non
         _run_auto(cfg, db, dry_run, limit, min_score)
     finally:
         learn(cfg, db)  # подстройка пауз и таймаутов по итогам сессии (правила, без LLM)
+    recruiters.run(cfg, db, dry_run=dry_run)  # опросы AI-рекрутеров в Telegram (Сбер и др.)
 
 
 def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: int | None) -> None:

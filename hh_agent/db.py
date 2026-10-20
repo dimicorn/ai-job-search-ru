@@ -37,6 +37,25 @@ CREATE TABLE IF NOT EXISTS vacancies (
     attempts      INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_status ON vacancies(status);
+
+-- Ссылки на ботов-рекрутеров из чатов hh: pending -> started
+CREATE TABLE IF NOT EXISTS tg_links (
+    vacancy_id  INTEGER PRIMARY KEY,
+    bot         TEXT,
+    start_param TEXT,
+    status      TEXT DEFAULT 'pending',
+    found_at    TEXT,
+    started_at  TEXT
+);
+-- Диалог с ботом: active | human (ждёт вас) | done; last_seen_id — последнее обработанное сообщение бота
+CREATE TABLE IF NOT EXISTS tg_dialogs (
+    bot          TEXT PRIMARY KEY,
+    vacancy_id   INTEGER,
+    status       TEXT,
+    last_seen_id INTEGER DEFAULT 0,
+    note         TEXT,
+    updated_at   TEXT
+);
 """
 
 COLUMNS = {
@@ -93,6 +112,36 @@ class DB:
         return self.conn.execute(
             "SELECT COUNT(*) FROM vacancies WHERE status IN ('applied', 'unconfirmed') AND applied_at >= ?", (today,)
         ).fetchone()[0]
+
+    def tg_link(self, vid: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM tg_links WHERE vacancy_id=?", (vid,)).fetchone()
+
+    def add_tg_link(self, vid: int, bot: str, start_param: str) -> None:
+        self.conn.execute("INSERT OR IGNORE INTO tg_links (vacancy_id, bot, start_param, found_at) VALUES (?, ?, ?, ?)",
+                          (vid, bot, start_param, datetime.now().isoformat(timespec="seconds")))
+        self.conn.commit()
+
+    def tg_pending(self, bot: str) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM tg_links WHERE bot=? AND status='pending' ORDER BY found_at",
+                                 (bot,)).fetchall()
+
+    def tg_link_started(self, vid: int) -> None:
+        self.conn.execute("UPDATE tg_links SET status='started', started_at=? WHERE vacancy_id=?",
+                          (datetime.now().isoformat(timespec="seconds"), vid))
+        self.conn.commit()
+
+    def tg_link_bots(self) -> list[str]:
+        return [r[0] for r in self.conn.execute("SELECT DISTINCT bot FROM tg_links")]
+
+    def tg_dialog(self, bot: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM tg_dialogs WHERE bot=?", (bot,)).fetchone()
+
+    def save_tg_dialog(self, bot: str, **fields: Any) -> None:
+        fields["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute("INSERT OR IGNORE INTO tg_dialogs (bot) VALUES (?)", (bot,))
+        sets = ", ".join(f"{k}=?" for k in fields)
+        self.conn.execute(f"UPDATE tg_dialogs SET {sets} WHERE bot=?", (*fields.values(), bot))
+        self.conn.commit()
 
     def stats(self) -> Iterable[tuple[str, int]]:
         return self.conn.execute(

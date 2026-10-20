@@ -15,6 +15,7 @@ from rich.table import Table
 from . import analyst as analyst_mod
 from .applier import apply_one
 from .autopilot import run_auto
+from . import recruiters
 from .learning import learn, report
 from .browser import LOGIN_URL, SITES, SiteTabs, is_logged_in, open_browser, pause, source_of
 from .config import Config, load_config
@@ -43,6 +44,8 @@ def cmd_login(cfg: Config, db: DB) -> None:
                 console.print(f"[green]{site}: готово, сессия сохранена.[/]")
             else:
                 console.print(f"[red]{site}: вход не обнаружен.[/] Войдите {LOGIN_HINT[src]} и повторите hh-agent login.")
+    if cfg.telegram.enabled:
+        recruiters.login(cfg)
 
 
 def cmd_scan(cfg: Config, db: DB, analyze: bool = True) -> None:
@@ -223,7 +226,7 @@ def cmd_stats(cfg: Config, db: DB) -> None:
         n = sum(count(d, sent(src)) for src in sites)
         used = sum(tok(e) for e in llm if e["ts"] >= d)
         return k(used // n) if n and used else "—"
-    purposes = {"score": "оценка", "letter": "письма", "questions": "вопросы", "report": "отчёт", "other": "прочее"}
+    purposes = {"score": "оценка", "letter": "письма", "questions": "вопросы", "recruiter": "рекрутеры в Telegram", "report": "отчёт", "other": "прочее"}
     metrics += [
         ("LLM-вызовов", lambda d: sum(1 for e in llm if e["ts"] >= d)),
         ("Токенов (вход + выход)", lambda d: k(sum(tok(e) for e in llm if e["ts"] >= d))),
@@ -290,6 +293,8 @@ def main() -> None:
     au.add_argument("--limit", type=int, help="максимум откликов за запуск")
     au.add_argument("--min-score", type=int)
     sub.add_parser("autopilot", help="scan + оценка + auto — для запуска по расписанию")
+    rc = sub.add_parser("recruiters", help="пройти опросы AI-рекрутеров в Telegram (сами идут в конце auto)")
+    rc.add_argument("--dry-run", action="store_true", help="показать, что агент ответил бы, ничего не отправляя")
     rp = sub.add_parser("report", help="сводка и рекомендации по журналу событий за N дней (через LLM)")
     rp.add_argument("--days", type=int, default=7)
     sub.add_parser("stats", help="статистика за сегодня, 7 и 30 дней")
@@ -302,7 +307,7 @@ def main() -> None:
             f"Команда {a.cmd} интерактивная: запустите её в обычном окне терминала "
             "(не через `!` в Claude Code и не из cron)."
         )
-    if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot"):
+    if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot", "recruiters"):
         _keep_awake()
     cfg = load_config(a.config)
     db = DB(cfg.path(cfg.db_path))
@@ -334,6 +339,10 @@ def main() -> None:
             cmd_review(cfg, db)
         finally:
             learn(cfg, db)
+    elif a.cmd == "recruiters":
+        if not cfg.telegram.enabled:
+            raise SystemExit("Включите telegram.enabled в config.yaml.")
+        recruiters.run(cfg, db, dry_run=a.dry_run)
     elif a.cmd == "stats":
         cmd_stats(cfg, db)
     elif a.cmd == "list":
