@@ -174,6 +174,32 @@ def _choose(base: Path, i: int | None = None) -> dict[str, Any]:
             "command": _ask("Команда (например, ollama run qwen3:32b)")}
 
 
+_FACTS = re.compile(r"^  facts: \|\n((?:    [^\n]*\n|\n)*)", re.M)
+
+
+def fill_facts(text: str, ask=input) -> str:
+    """Спросить частые факты по шаблону questions.facts («# Ожидаемая зарплата:» → «Ожидаемая зарплата: …»).
+    Уже заполненные факты (есть строки не-комментарии) не трогаем; пустой ответ — пропустить пункт."""
+    m = _FACTS.search(text)
+    if not m or any(ln.strip() and not ln.strip().startswith("#") for ln in m.group(1).splitlines()):
+        return text
+    console.print("\n[bold]Частые вопросы работодателей[/] — ответы попадут в questions.facts, по ним агент "
+                  "отвечает в анкетах и ботам. Enter — пропустить, поправить можно потом в config.yaml.")
+    lines = []
+    for ln in m.group(1).splitlines():
+        label = ln.strip().lstrip("#").strip()
+        if label.endswith(":") and "заполните" not in label:
+            try:
+                answer = ask(f"{label} ").strip()
+            except EOFError:
+                answer = ""
+            if answer:
+                lines.append(f"    {label} {answer}")
+                continue
+        lines.append(ln)
+    return text[:m.start(1)] + "\n".join(lines) + "\n" + text[m.end(1):]
+
+
 def setup(config_path: Path) -> None:
     from .config import load_config
     from .llm import ask_backend, fallback_cfg
@@ -194,6 +220,10 @@ def setup(config_path: Path) -> None:
         text = _set(text, k, v)
     config_path.write_text(text, encoding="utf-8")
     console.print(f"[green]LLM записана в {config_path.name}:[/] " + ", ".join(f"{k}={v}" for k, v in values.items()))
+    filled = fill_facts(config_path.read_text(encoding="utf-8"))
+    if filled != config_path.read_text(encoding="utf-8"):
+        config_path.write_text(filled, encoding="utf-8")
+        console.print(f"[green]Факты записаны в {config_path.name}[/] (questions.facts).")
 
     cfg = load_config(config_path)
     checks = [("Основная LLM", cfg, cfg.analyst.backend)]
@@ -207,5 +237,5 @@ def setup(config_path: Path) -> None:
         except (SystemExit, Exception) as e:
             console.print(f"[red]Тестовый запрос не прошёл:[/] {e}\nИсправьте раздел analyst в {config_path.name} "
                           "или запустите uv run hh-agent setup ещё раз.")
-    console.print("\nДальше: заполните resume.md, в config.yaml — searches, analyst.preferences и questions.facts; "
-                  "затем uv run hh-agent login.")
+    console.print("\nДальше: uv run hh-agent login (вход на сайты), uv run hh-agent resume (резюме с hh.ru в resume.md); "
+                  "в config.yaml проверьте searches (фильтры поиска) и analyst.preferences (что ищете).")

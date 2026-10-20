@@ -21,7 +21,7 @@ ask() {
     [[ $reply =~ ^[YyДд] ]]
 }
 
-say "1/5 uv — менеджер Python-пакетов"
+say "1/6 uv — менеджер Python-пакетов"
 if ! command -v uv >/dev/null; then
     export PATH="$HOME/.local/bin:$PATH"  # uv мог установиться раньше, но не попасть в PATH этой оболочки
 fi
@@ -35,11 +35,11 @@ if ! command -v uv >/dev/null; then
 fi
 echo "uv: $(uv --version)"
 
-say "2/5 Зависимости и браузер Chromium для Playwright"
+say "2/6 Зависимости и браузер Chromium для Playwright"
 uv sync
 uv run playwright install chromium
 
-say "3/5 Настройка: config.yaml и LLM"
+say "3/6 Настройка: config.yaml и LLM"
 if [[ ! -f config.yaml ]]; then
     uv run hh-agent setup
 elif ask "config.yaml уже есть. Заново выбрать LLM (основную и запасную)?" n; then
@@ -47,17 +47,27 @@ elif ask "config.yaml уже есть. Заново выбрать LLM (осно
 else
     echo "Оставляю config.yaml как есть."
 fi
-echo "Проверьте и заполните: resume.md (резюме), в config.yaml — searches (фильтры поиска),"
-echo "analyst.preferences (что ищете) и questions.facts (факты для ответов работодателям)."
+echo "Проверьте в config.yaml searches (фильтры поиска) и analyst.preferences (что ищете)."
 
-say "4/5 Вход на hh.ru, Хабр Карьеру и в Telegram"
+say "4/6 Вход на hh.ru, Хабр Карьеру и в Telegram"
 if [[ -t 0 ]] && ask "Войти сейчас? Откроется браузер; Telegram спросит номер и код" y; then
     uv run hh-agent login
 else
     echo "Позже: uv run hh-agent login"
 fi
 
-say "5/5 Ежедневный autopilot (поиск → оценка → отклики → опросы ботов)"
+say "5/6 Резюме"
+if [[ ! -f resume.md ]] || cmp -s resume.md resume.example.md; then
+    if ask "Скачать резюме с hh.ru в resume.md (без ФИО и контактов)?" y; then
+        uv run hh-agent resume || warn "Не вышло — вставьте текст резюме в resume.md сами или: uv run hh-agent resume"
+    else
+        echo "Позже: uv run hh-agent resume — или вставьте текст резюме в resume.md сами."
+    fi
+else
+    echo "resume.md уже заполнен. Обновить с hh.ru: uv run hh-agent resume --force"
+fi
+
+say "6/6 Ежедневный autopilot (поиск → оценка → отклики → опросы ботов)"
 if [[ $(uname) != Darwin ]]; then
     echo "Расписание через launchd — только на macOS; на Linux добавьте в cron: cd $DIR && $(command -v uv) run hh-agent autopilot"
 elif ask "Запускать autopilot каждый день сам?" n; then

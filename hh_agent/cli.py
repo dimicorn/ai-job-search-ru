@@ -26,6 +26,32 @@ from .scout import scan
 LOGIN_HINT = {"hh": "как соискатель", "habr": "через Хабр Аккаунт"}
 
 
+def resume_is_template(cfg: Config) -> bool:
+    """resume.md ещё не заполнен: его нет или это копия resume.example.md."""
+    path, example = cfg.path(cfg.analyst.resume_file), cfg.path("resume.example.md")
+    return not path.exists() or (example.exists() and path.read_text(encoding="utf-8") == example.read_text(encoding="utf-8"))
+
+
+def cmd_resume(cfg: Config, force: bool) -> None:
+    """Резюме с hh.ru → resume.md, без ФИО и контактов (см. hh_agent/resume.py)."""
+    from . import resume
+
+    path = cfg.path(cfg.analyst.resume_file)
+    if not force and not resume_is_template(cfg):
+        raise SystemExit(f"{path.name} уже заполнен. Перезаписать резюме с hh.ru: uv run hh-agent resume --force "
+                         f"(старый файл сохраню как {path.name}.bak).")
+    with open_browser(cfg, headless=cfg.browser.headless_scan) as (_, page):
+        if not is_logged_in(page):
+            raise SystemExit("Нет входа на hh.ru — выполните uv run hh-agent login.")
+        title, md = resume.fetch(page, cfg.apply.resume_title)
+    if path.exists() and not resume_is_template(cfg):
+        path.with_name(path.name + ".bak").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    path.write_text(md, encoding="utf-8")
+    console.print(f"[green]Резюме «{title}» с hh.ru сохранено в {path.name}[/] ({len(md.splitlines())} строк; "
+                  "ФИО и контакты убраны). Проверьте его и допишите то, чего нет на hh: проекты, цифры, стек — "
+                  "по нему LLM оценивает вакансии и пишет письма.")
+
+
 def cmd_login(cfg: Config, db: DB) -> None:
     """Вход на каждый сайт из searches (hh.ru, Хабр Карьера); сессии хранятся в профиле браузера."""
     with open_browser(cfg) as (ctx, first):
@@ -315,6 +341,8 @@ def main() -> None:
     sub.add_parser("help", help="показать этот список команд")
     sub.add_parser("setup", help="настройка: создать config.yaml и выбрать LLM (Codex, Claude, OpenAI-совместимый API, локальная)")
     sub.add_parser("login", help="войти в hh.ru, Хабр Карьеру и Telegram (один раз, сессия сохраняется)")
+    rs = sub.add_parser("resume", help="скачать резюме с hh.ru в resume.md (без ФИО и контактов)")
+    rs.add_argument("--force", action="store_true", help="перезаписать заполненный resume.md (старый — в .bak)")
     s = sub.add_parser("scan", help="найти вакансии по фильтрам и оценить их")
     s.add_argument("--no-analyze", action="store_true")
     sub.add_parser("analyze", help="оценить ещё не оценённые вакансии")
@@ -363,6 +391,8 @@ def main() -> None:
     db = DB(cfg.path(cfg.db_path))
     if a.cmd == "login":
         cmd_login(cfg, db)
+    elif a.cmd == "resume":
+        cmd_resume(cfg, a.force)
     elif a.cmd == "scan":
         cmd_scan(cfg, db, analyze=not a.no_analyze)
     elif a.cmd == "analyze":
