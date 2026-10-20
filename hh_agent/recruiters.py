@@ -33,6 +33,7 @@ from .config import Config
 from .db import DB
 from .events import log_event
 from .llm import LimitReached, ask_json
+from .questions import ANSWER_STYLE
 
 console = Console()
 
@@ -64,8 +65,9 @@ SYSTEM = """Ты проходишь за соискателя опрос AI-ре
 
 Дана переписка («Бот» — рекрутер, «Я» — соискатель), резюме, факты, пожелания и вакансия.
 Реши следующий шаг по последним сообщениям бота:
-- reply — ответить текстом (text). От первого лица, по делу, 1–4 предложения, на языке бота,
-  без markdown и подписи. Если бот задал несколько вопросов — ответь на все.
+- reply — ответить текстом (text). От первого лица, по делу, на языке бота, без markdown и подписи:
+  на вопрос об опыте 1–4 предложения, на вопрос на знания — сколько нужно для точного ответа.
+  Если бот задал несколько вопросов — ответь на все.
 - button — нажать кнопку последнего сообщения бота; button — её номер из списка «кнопки».
   Когда бот предлагает варианты ответа — выбери подходящий по резюме и фактам. Кнопки вроде
   «Начать», «Продолжить», «Да, готов(а)» — нажимай. Если бот спрашивает, удобно ли сейчас
@@ -80,7 +82,9 @@ SYSTEM = """Ты проходишь за соискателя опрос AI-ре
   по ссылке, голосовой или видеоответ, файл, документы, паспортные данные, коды, пароли;
   что-то странное или подозрительное. В text — черновик ответа для человека.
 
-Не повод для human: отсутствие опыта с чем-то (честно ответь, что опыта нет, и назови близкий),
+{style}
+
+Не повод для human: отсутствие опыта с чем-то (ответь через близкий опыт), вопросы на знания,
 стаж (посчитай по датам в резюме), мотивация и интерес к задачам (выводи из резюме и пожеланий).
 Зарплату, сроки выхода, гражданство, город и т.п. бери только из фактов — не выдумывай.
 Никогда не упоминай «резюме», «факты», ИИ и что отвечаешь не сам.
@@ -265,7 +269,7 @@ def _vacancy_context(cfg: Config, db: DB, vid: int | None, survey: str | None) -
 
 
 def _decide(cfg: Config, db: DB, msgs: list, vid: int | None, survey: str | None) -> Step:
-    system = SYSTEM.format(consent=CONSENT if cfg.telegram.accept_consent else "")
+    system = SYSTEM.format(consent=CONSENT if cfg.telegram.accept_consent else "", style=ANSWER_STYLE)
     user = (f"<resume>\n{cfg.resume_text().strip()}\n</resume>\n\n"
             f"<facts>\n{cfg.questions.facts.strip() or '—'}\n</facts>\n\n"
             f"<preferences>\n{cfg.analyst.preferences.strip() or '—'}\n</preferences>\n\n"
@@ -327,11 +331,15 @@ def _switch_command(client, entity) -> str | None:
     return None
 
 
-def _want_switch(cfg: Config, db: DB, bot: str) -> bool:
-    """Есть недавний отклик без опроса, сделанный после того, как агент последний раз менял вакансию."""
+def _want_switch(cfg: Config, db: DB, client, bot: str, entity) -> bool:
+    """Сменить вакансию, если в последнем списке бота есть вакансия без опроса (в том числе отклики,
+    сделанные не агентом) или есть недавний отклик без опроса, сделанный после прошлой смены."""
+    surveys = db.tg_surveys(bot)
+    lists = [o for o in map(_choice, reversed(_messages(client, entity, 100))) if o]
+    if lists and any(_norm(title) not in surveys for _, title in lists[0]):
+        return True
     state = db.tg_dialog(bot)
     since = (state["switched_at"] if state else None) or ""
-    surveys = db.tg_surveys(bot)
     return any(_norm(r["title"]) not in surveys and (r["applied_at"] or "") > since for r in _company_applies(cfg, db))
 
 
@@ -392,7 +400,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             continue
 
         if _handled(state, last):
-            if state["status"] in ("done", None) and not dry_run and _want_switch(cfg, db, bot):
+            if state["status"] in ("done", None) and not dry_run and _want_switch(cfg, db, client, bot, entity):
                 switch_cmd = switch_cmd or _switch_command(client, entity)
                 if switch_cmd:
                     console.print(f"  @{bot}: есть отклики без опроса — {switch_cmd}")
