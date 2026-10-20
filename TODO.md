@@ -4,7 +4,7 @@
 
 ## Перед публикацией
 
-- [ ] Убедиться, что CI зелёный (вкладка Actions: ruff и тесты на Ubuntu и macOS).
+- [x] Убедиться, что CI зелёный (вкладка Actions: ruff и тесты на Ubuntu и macOS).
 - [ ] Выпустить тег `v0.1.5`, чтобы у первых пользователей была версия с CHANGELOG.
 - [ ] Открыть репозиторий: Settings → General → Danger Zone → Change visibility.
       Личных данных в файлах и в истории git нет (проверено).
@@ -16,9 +16,6 @@
 
 ## Документация и поддержка
 
-- [ ] Страница «Если сломалось» (`docs/troubleshooting.md`): начать с `hh-agent doctor --online`; капча,
-      слетел вход на hh/Хабр/Telegram, поменялась вёрстка (`tests/fixtures/refresh.py`), лимиты LLM,
-      где смотреть `logs/events.jsonl`, `logs/autopilot.log` и `debug/`.
-- [ ] Шаблоны issue (`.github/ISSUE_TEMPLATE/`): просить вывод `hh-agent doctor`, `hh-agent stats`
-      и кусок лога.
+- [x] Страница «Если сломалось» — `docs/troubleshooting.md`.
+- [x] Шаблоны issue — `.github/ISSUE_TEMPLATE/` (ошибка, идея).
 - [ ] README на английском (низкий приоритет: аудитория hh.ru и Хабра русскоязычная).

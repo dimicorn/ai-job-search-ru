@@ -1,0 +1,50 @@
+name: Ошибка
+description: Что-то работает не так, как описано в документации
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Сначала загляните в [«Если сломалось»](https://github.com/dimicorn/job_search_agent/blob/main/docs/troubleshooting.md) — частые случаи там.
+        **Не вставляйте личные данные:** тексты писем и ответов работодателям, резюме, контакты, ключи API.
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось
+      description: Что делали, что ожидали и что получилось. Команда, которую запускали.
+      placeholder: "uv run hh-agent autopilot — поиск на hh.ru находит 0 вакансий, хотя на сайте выдача есть"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Вывод `uv run hh-agent doctor --online`
+      description: Версия, ОС, LLM и что не так с настройкой — всё здесь.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: site
+    attributes:
+      label: Где
+      multiple: true
+      options:
+        - hh.ru
+        - Хабр Карьера
+        - Telegram (AI-рекрутеры)
+        - LLM (оценка, письма, ответы)
+        - Установка и настройка
+        - Другое
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Кусок лога
+      description: Строки из `logs/events.jsonl` или вывод команды вокруг ошибки. Для расписания — `logs/autopilot.log`.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Что ещё
+      description: Скриншот из `debug/` (без личных данных), упавший тест после `tests/fixtures/refresh.py` и т.п.

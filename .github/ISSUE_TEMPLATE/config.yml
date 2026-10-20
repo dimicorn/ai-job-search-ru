@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Если сломалось
+    url: https://github.com/dimicorn/job_search_agent/blob/main/docs/troubleshooting.md
+    about: Частые проблемы — капча, вход, лимиты LLM, manual — и как их решить.
+  - name: Документация
+    url: https://github.com/dimicorn/job_search_agent#подробнее
+    about: Установка, LLM, автоотклики, Telegram и прочее.
