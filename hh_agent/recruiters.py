@@ -396,6 +396,14 @@ def _unanswered(msgs: list) -> list:
     return [m for m in msgs[i + 1:] if not m.out and _choice(m) is None and m.date > fresh]
 
 
+def _human_pause(t, question: str, answer: str, spent: float) -> float:
+    """Сколько ещё ждать до ответа: подумать + прочитать вопрос + набрать ответ, минус уже прошедшее
+    (запрос к LLM), но не дольше telegram.max_reply_seconds."""
+    secs = (random.uniform(*t.reply_seconds) + len(question) / random.uniform(*t.read_chars_per_second)
+            + len(answer) / random.uniform(*t.type_chars_per_second))
+    return max(0.0, min(secs, t.max_reply_seconds) - spent)
+
+
 def _say(bot: str, m, what: str) -> None:
     console.print(f"  @{bot}: {' '.join((m.message or '').split())[:160]}\n    → {what}", markup=False)
 
@@ -508,6 +516,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 if _norm(current) not in db.tg_surveys(bot):
                     db.save_tg_survey(bot, _norm(current), "active", vid)
                 db.save_tg_dialog(bot, survey=current, vacancy_id=vid)
+        asked_at = time.monotonic()  # с этого момента «читаем и думаем» — см. _human_pause
         known = faq.lookup(cfg, last.message or "") if hanging is None and not _buttons(last) else None
         if known:  # частый вопрос — без вызова LLM
             step = Step(action="reply", text=known, button=-1, missing_fact="", reason="ответ из faq.yaml",
@@ -559,7 +568,15 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             if not _wait_bot(client, entity, t.wait_reply_seconds):
                 return "active"
             continue
-        time.sleep(random.uniform(*t.reply_seconds))
+        pause = _human_pause(t, target.message or "", step.text if step.action == "reply" else "",
+                             time.monotonic() - asked_at)
+        if pause > 0:
+            console.print(f"    [dim]отвечу через {pause:.0f} с[/]")
+            if step.action == "reply":
+                with client.action(entity, "typing"):  # в чате бота — «печатает…»
+                    time.sleep(pause)
+            else:
+                time.sleep(pause)
         db.save_tg_dialog(bot, status="active", last_seen_id=last.id)  # до ответа: правку сообщения ботом видно по времени
         if step.action == "button":
             try:

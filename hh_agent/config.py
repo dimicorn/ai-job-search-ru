@@ -106,7 +106,12 @@ class Telegram(BaseModel):
     hh_links: bool = False                    # искать ссылку на бота в чатах hh (открывает hh.ru); бот из bots — не нужно
     check_days: int = 7                       # искать ссылку в чатах hh для откликов за столько дней
     max_turns: int = 40                       # ходов в одном диалоге за запуск
-    reply_seconds: tuple[float, float] = (6, 20)  # «думаем и печатаем» перед ответом
+    # Ответ — не мгновенно, как у человека: подумать + прочитать вопрос + набрать ответ; время на запрос
+    # к LLM засчитывается, пока ждём, в чате бота «печатает…».
+    reply_seconds: tuple[float, float] = (6, 20)        # подумать перед ответом или нажатием кнопки
+    read_chars_per_second: tuple[float, float] = (20, 35)  # скорость чтения вопроса
+    type_chars_per_second: tuple[float, float] = (5, 9)    # скорость набора ответа
+    max_reply_seconds: int = 240                        # дольше на один ответ не ждём
     wait_reply_seconds: int = 120             # сколько ждать следующего сообщения бота
     share_contact: bool = False               # true — на просьбу «поделиться контактом» отдавать свой номер
     accept_consent: bool = True               # принимать согласие на обработку персональных данных для подбора
