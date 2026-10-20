@@ -80,8 +80,10 @@ COLUMNS = {
 
 class DB:
     def __init__(self, path: Path):
-        self.conn = sqlite3.connect(path)
+        # Соединение — на поток (sqlite3 не делит их между потоками); WAL — чтение не ждёт записи.
+        self.conn = sqlite3.connect(path, timeout=30)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(vacancies)")}
         if "attempts" not in cols:  # миграция базы, созданной до появления обучения
@@ -148,10 +150,6 @@ class DB:
         self.conn.execute("UPDATE tg_links SET status='started', started_at=? WHERE bot=? AND status='pending'",
                           (datetime.now().isoformat(timespec="seconds"), bot))
         self.conn.commit()
-
-    def tg_link_companies(self) -> list[str]:
-        return [r[0] or "" for r in self.conn.execute(
-            "SELECT DISTINCT v.company FROM tg_links l JOIN vacancies v ON v.id = l.vacancy_id")]
 
     def tg_link_bots(self) -> list[str]:
         return [r[0] for r in self.conn.execute("SELECT DISTINCT bot FROM tg_links")]

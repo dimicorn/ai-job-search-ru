@@ -43,6 +43,7 @@ class Analyst(BaseModel):
     codex_model: str | None = None  # None — модель Codex по умолчанию (~/.codex/config.toml не читается)
     codex_effort: str | None = None  # глубина рассуждения Codex: low | medium | high | xhigh | max; None — по умолчанию модели
     batch_size: int = 8          # вакансий на один вызов оценки
+    parallel: int = 3            # одновременных запросов к LLM при оценке и письмах
     letter_batch_size: int = 4   # писем на один вызов
     min_score: int = 70
     resume_file: str = "resume.md"
@@ -94,8 +95,9 @@ class Telegram(BaseModel):
     api_id: int | None = None                 # с my.telegram.org → API development tools
     api_hash: str | None = None
     session: str = ".telegram"                # файл сессии Telethon (.session), как профиль браузера
-    companies: list[str] = Field(default_factory=lambda: ["Сбер", "Sber"])  # у откликов сюда ищем ссылку на бота в чате hh
+    companies: list[str] = Field(default_factory=lambda: ["Сбер", "Sber"])  # компании ботов: новый отклик — повод снова зайти к боту
     bots: list[str] = Field(default_factory=list)  # боты, которые пишут сами (username без @)
+    hh_links: bool = False                    # искать ссылку на бота в чатах hh (открывает hh.ru); бот из bots — не нужно
     check_days: int = 7                       # искать ссылку в чатах hh для откликов за столько дней
     max_turns: int = 40                       # ходов в одном диалоге за запуск
     reply_seconds: tuple[float, float] = (6, 20)  # «думаем и печатаем» перед ответом

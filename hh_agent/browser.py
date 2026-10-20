@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fcntl
 import random
+import socket
 import subprocess
 import sys
 import time
@@ -34,8 +35,17 @@ def source_of(url: str) -> str:
     return "habr" if "career.habr.com" in (url or "") else "hh"
 
 
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 @contextmanager
-def open_browser(cfg: Config, headless: bool = False) -> Iterator[tuple[BrowserContext, Page]]:
+def open_browser(cfg: Config, headless: bool = False,
+                 cdp_port: int | None = None) -> Iterator[tuple[BrowserContext, Page]]:
+    """Браузер с профилем агента. cdp_port — открыть отладочный порт (только 127.0.0.1), чтобы
+    рабочие потоки подключались к этому же браузеру через attach()."""
     global _CFG, _HEADLESS
     _CFG, _HEADLESS = cfg, headless
     profile = cfg.path(cfg.browser.profile_dir)
@@ -60,12 +70,34 @@ def open_browser(cfg: Config, headless: bool = False) -> Iterator[tuple[BrowserC
             headless=headless,
             locale="ru-RU",
             viewport={"width": 1280, "height": 900},
+            args=[f"--remote-debugging-port={cdp_port}"] if cdp_port else [],
         )
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:
             yield ctx, page
         finally:
             ctx.close()
+
+
+@contextmanager
+def attach(cdp_port: int) -> Iterator[tuple[BrowserContext, Page]]:
+    """Своя вкладка общего браузера для рабочего потока. Синхронный Playwright привязан к потоку,
+    поэтому каждый поток подключается к браузеру по CDP; профиль и сессии сайтов — общие."""
+    with sync_playwright() as p:
+        b = p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+        ctx = b.contexts[0]
+        page = ctx.new_page()
+        # Эмуляция из launch_persistent_context на подключения по CDP не распространяется.
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.set_extra_http_headers({"Accept-Language": "ru-RU,ru;q=0.9"})
+        try:
+            yield ctx, page
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
+            b.close()  # отключиться от браузера; сам браузер закроет open_browser
 
 
 def pause(rng: tuple[float, float]) -> None:
@@ -98,11 +130,6 @@ def captcha_visible(page: Page) -> bool:
 
 _CFG: Config | None = None   # выставляет open_browser
 _HEADLESS = False
-DEFER_CAPTCHA = False         # auto с двумя сайтами: не ждать капчу, а работать на другом сайте
-
-
-class CaptchaPending(CaptchaError):
-    """Капча показана и ждёт человека; агент тем временем работает на другом сайте."""
 
 
 def notify(title: str, text: str) -> None:
@@ -125,8 +152,6 @@ def _wait_for_human(page: Page) -> None:
         raise CaptchaError("hh.ru показал капчу")
     page.bring_to_front()
     notify("hh-agent: пройдите капчу", f"Сайт просит подтвердить, что вы не робот. Жду {wait_s // 60} мин.")
-    if DEFER_CAPTCHA:
-        raise CaptchaPending("капча ждёт человека")
     print(f"\n⚠️  hh.ru показал капчу. Пройдите её в окне браузера — жду до {wait_s // 60} мин…", flush=True)
     t0 = time.monotonic()
     while time.monotonic() - t0 < wait_s:

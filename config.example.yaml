@@ -62,6 +62,7 @@ analyst:
   codex_model: null                  # null — модель Codex по умолчанию; gpt-6-astra — самая сильная
   codex_effort: high                 # рассуждение Codex: low | medium | high | xhigh | max; null — по умолчанию модели
   batch_size: 8                      # вакансий на один вызов оценки (меньше токенов на вакансию)
+  parallel: 3                        # одновременных запросов к Codex при оценке и письмах
   letter_batch_size: 4               # писем на один вызов
   min_score: 70                      # в review попадают вакансии с баллом не ниже
   resume_file: resume.md
@@ -123,8 +124,9 @@ telegram:
   enabled: false
   api_id: null
   api_hash: null
-  companies: ["Сбер", "Sber"]       # у откликов в эти компании искать ссылку на бота в чате hh
-  bots: []                          # боты, которые пишут сами, без ссылки (username без @)
+  companies: ["Сбер", "Sber"]       # компании ботов: новый отклик в них — повод снова зайти к боту
+  bots: [giga_recruiter_bot]        # боты, которые пишут сами, без ссылки (ГигаРекрутер Сбера)
+  hh_links: false                   # искать ссылку на бота в чатах hh (открывает hh.ru)
   share_contact: false              # true — на кнопку «поделиться номером» отдавать свой телефон
   accept_consent: true              # принимать согласие на обработку персональных данных для подбора
 

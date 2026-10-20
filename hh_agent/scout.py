@@ -183,9 +183,12 @@ def sorted_by_date(s: Search) -> bool:
     return q.get("order_by") == "publication_time" or q.get("sort") == "date"
 
 
-def scan(cfg: Config, db: DB, page: Page) -> int:
+def scan(cfg: Config, db: DB, page: Page, sources: set[str] | None = None) -> int:
+    """sources — искать только на этих сайтах (autopilot ищет на hh и Хабре в разных потоках)."""
     added = 0
     for s in cfg.searches:
+        if sources is not None and s.source not in sources:
+            continue
         search_page, fetch_details = SOURCES[s.source]
         console.rule(f"[bold]Поиск: {s.name}[/] ({SITES[s.source]})")
         stats = {"source": s.source, "total": None, "pages": 0, "added": 0, "filtered": 0, "seen": 0}

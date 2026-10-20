@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
@@ -246,17 +247,32 @@ def _chunks(seq, n):
     return [seq[i:i + n] for i in range(0, len(seq), max(1, n))]
 
 
+def _in_parallel(cfg: Config, fn, chunks):
+    """fn(пачка) для всех пачек сразу — до analyst.parallel запросов к LLM одновременно.
+    Выдаёт (пачка, результат, ошибка) по мере готовности; после LimitReached новые запросы не начинает."""
+    with ThreadPoolExecutor(max_workers=max(1, cfg.analyst.parallel)) as ex:
+        futs = {ex.submit(fn, c): c for c in chunks}
+        for f in as_completed(futs):
+            if f.cancelled():
+                continue
+            err = f.exception()
+            if isinstance(err, LimitReached):
+                for other in futs:
+                    other.cancel()
+            yield futs[f], (None if err else f.result()), err
+
+
 def _write_letters(cfg: Config, db: DB, analyst: Analyst, rows) -> int:
     """Письма для подходящих вакансий пачками (letter_backend: codex). Неудачи — письмо напишут при отклике."""
     done = 0
-    for chunk in _chunks(rows, cfg.analyst.letter_batch_size):
-        try:
-            letters = analyst.letters_batch(chunk, {r["id"]: dec_list(r["reasons"]) for r in chunk})
-        except LimitReached as e:
-            console.print(f"[yellow]Лимит исчерпан, письма — при отклике: {e}[/]")
-            break
-        except RuntimeError as e:
-            console.print(f"  [red]× письма: {e}[/]")
+    batches = _in_parallel(cfg, lambda c: analyst.letters_batch(c, {r["id"]: dec_list(r["reasons"]) for r in c}),
+                           _chunks(rows, cfg.analyst.letter_batch_size))
+    for chunk, letters, err in batches:
+        if isinstance(err, LimitReached):
+            console.print(f"[yellow]Лимит исчерпан, письма — при отклике: {err}[/]")
+            continue
+        if err is not None:
+            console.print(f"  [red]× письма: {err}[/]")
             continue
         for r in chunk:
             if letters.get(r["id"]):
@@ -273,17 +289,15 @@ def analyze_new(cfg: Config, db: DB) -> int:
     analyst = Analyst(cfg)
     done = errors = passed = 0
     limit = False
-    for chunk in _chunks(rows, cfg.analyst.batch_size):
-        try:
-            res = analyst.assess_batch(chunk)
-        except LimitReached as e:
-            console.print(f"[yellow]Лимит исчерпан, остановка (остальное оценится при следующем запуске): {e}[/]")
+    for chunk, res, err in _in_parallel(cfg, analyst.assess_batch, _chunks(rows, cfg.analyst.batch_size)):
+        if isinstance(err, LimitReached):
+            console.print(f"[yellow]Лимит исчерпан (остальное оценится при следующем запуске): {err}[/]")
             limit = True
-            break
-        except RuntimeError as e:
-            console.print(f"  [red]× пачка из {len(chunk)}: {e}[/] — оценится при следующем запуске")
+            continue
+        if err is not None:
+            console.print(f"  [red]× пачка из {len(chunk)}: {err}[/] — оценится при следующем запуске")
             errors += len(chunk)
-            log_event(cfg, "error", where="analyze", message=str(e)[:500])
+            log_event(cfg, "error", where="analyze", message=str(err)[:500])
             continue
         for row in chunk:
             a = res.get(row["id"])

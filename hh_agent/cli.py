@@ -305,8 +305,8 @@ def main() -> None:
     au.add_argument("--dry-run", action="store_true", help="заполнить формы, но не отправлять (скриншоты в screenshots/)")
     au.add_argument("--limit", type=int, help="максимум откликов за запуск")
     au.add_argument("--min-score", type=int)
-    sub.add_parser("autopilot", help="scan + оценка + auto — для запуска по расписанию")
-    rc = sub.add_parser("recruiters", help="пройти опросы AI-рекрутеров в Telegram (сами идут в конце auto)")
+    sub.add_parser("autopilot", help="поиск, оценка, отклики и Telegram параллельно — для запуска по расписанию")
+    rc = sub.add_parser("recruiters", help="пройти опросы AI-рекрутеров в Telegram (в auto/autopilot идут параллельно с откликами)")
     rc.add_argument("--dry-run", action="store_true", help="показать, что агент ответил бы, ничего не отправляя")
     rp = sub.add_parser("report", help="сводка и рекомендации по журналу событий за N дней (через LLM)")
     rp.add_argument("--days", type=int, default=7)
@@ -347,8 +347,7 @@ def main() -> None:
     elif a.cmd == "auto":
         run_auto(cfg, db, dry_run=a.dry_run, limit=a.limit, min_score=a.min_score)
     elif a.cmd == "autopilot":
-        cmd_scan(cfg, db)
-        run_auto(cfg, db)
+        run_auto(cfg, db, produce=True)  # поиск, оценка, отклики и Telegram — параллельно
     elif a.cmd == "run":
         cmd_scan(cfg, db)
         try:
