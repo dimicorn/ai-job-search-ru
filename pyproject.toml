@@ -3,6 +3,8 @@ name = "hh-agent"
 version = "0.1.0"
 description = "Агент откликов на hh.ru: поиск по фильтрам, оценка и письма через LLM, автоотклики с ответами на вопросы работодателя"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "anthropic>=0.70",
     "playwright>=1.48",
