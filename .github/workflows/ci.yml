@@ -1,4 +1,4 @@
-name: Lint
+name: CI
 
 on:
   push:
@@ -17,3 +17,25 @@ jobs:
         uses: astral-sh/ruff-action@v3
         with:
           args: check --output-format github
+
+  tests:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Pytest
+        run: uv run pytest -q
