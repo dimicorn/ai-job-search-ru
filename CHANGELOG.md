@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3] - 2026-10-20
+
+### ⚙️ Miscellaneous Tasks
+
+- Attribute changelog commits to the github-actions bot
+
 ## [0.1.2] - 2026-10-20
 
 ### ⚙️ Miscellaneous Tasks
