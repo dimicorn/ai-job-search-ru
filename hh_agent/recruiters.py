@@ -1,13 +1,17 @@
 """AI-рекрутеры в Telegram: после откликов (например, в Сбер) агент проходит их опрос.
 
 Как работает:
-  1. links_from_hh() — для недавних откликов в компании из telegram.companies открывает чат
-     вакансии на hh и ищет ссылку t.me/<бот>?start=<код>: по коду бот понимает, о какой вакансии речь.
+  1. links_from_hh() — пока бот компании неизвестен, для недавних откликов в компании из
+     telegram.companies открывает чат вакансии на hh и ищет ссылку t.me/<бот>?start=<код>.
+     Код привязан к кандидату, а не к вакансии: по ссылке бот запускается, только если чата с ним
+     ещё нет.
   2. Боты из этих ссылок и из telegram.bots (те, что пишут сами): агент читает переписку через
      Telethon от имени вашего аккаунта и отвечает по резюме и фактам — текстом или кнопкой.
-     У бота один чат на все вакансии, поэтому следующую ссылку агент запускает, только когда
-     предыдущий опрос закончен.
-  3. Чего нет в фактах, что требует решения или личных данных, — уведомление и logs/questions.md.
+  3. У бота один чат на все вакансии (ГигаРекрутер Сбера): после каждого отклика он присылает
+     список «по какой вакансии продолжить». Вакансию выбирает код — первую сверху (самую свежую),
+     по которой опроса ещё не было; после опроса агент командой бота «сменить вакансию» берёт
+     следующую. Пройденные опросы — в таблице tg_surveys.
+  4. Чего нет в фактах, что требует решения или личных данных, — уведомление и logs/questions.md.
      Ответьте боту сами в Telegram; со следующего запуска агент продолжит.
 """
 from __future__ import annotations
@@ -48,7 +52,7 @@ STALE = timedelta(hours=2)  # бот не ответил на наше сооб�
 
 
 class Step(BaseModel):
-    action: Literal["reply", "button", "wait", "done", "human"]
+    action: Literal["reply", "button", "wait", "done", "ignore", "human"]
     text: str
     button: int
     missing_fact: str
@@ -64,11 +68,13 @@ SYSTEM = """Ты проходишь за соискателя опрос AI-ре
   без markdown и подписи. Если бот задал несколько вопросов — ответь на все.
 - button — нажать кнопку последнего сообщения бота; button — её номер из списка «кнопки».
   Когда бот предлагает варианты ответа — выбери подходящий по резюме и фактам. Кнопки вроде
-  «Начать», «Продолжить», «Да, готов(а)» — нажимай.{consent}
+  «Начать», «Продолжить», «Да, готов(а)» — нажимай. Если бот спрашивает, удобно ли сейчас
+  ответить на вопросы, — да.{consent}
 - wait — сообщение бота не ждёт ответа (промежуточное: «секунду», «обрабатываю», пояснение
   перед вопросом) — подождать следующее.
-- done — опрос закончен: бот поблагодарил и больше ничего не спрашивает, сообщил, что передаст
-  ответы рекрутеру, или это отказ.
+- done — опрос по вакансии закончен: бот поблагодарил и больше ничего не спрашивает, сообщил,
+  что передаст ответы рекрутеру, или это отказ.
+- ignore — уведомление вне опроса, ответа не ждёт: статус рассмотрения изменён, рассылка вакансий.
 - human — нужен человек: вопрос о личных обстоятельствах, которых нет ни в резюме, ни в фактах
   (в missing_fact — какой факт нужен, кратко); выбор даты и времени встречи, тестовое задание
   по ссылке, голосовой или видеоответ, файл, документы, паспортные данные, коды, пароли;
@@ -93,14 +99,21 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").lower()).strip()
 
 
+def _company_applies(cfg: Config, db: DB) -> list[Any]:
+    """Недавние (telegram.check_days) отклики в компании из telegram.companies, свежие первыми."""
+    since = (datetime.now() - timedelta(days=cfg.telegram.check_days)).isoformat()
+    names = [c.lower() for c in cfg.telegram.companies]
+    rows = [r for r in db.by_status("applied", "unconfirmed")
+            if (r["applied_at"] or "") >= since and any(n in (r["company"] or "").lower() for n in names)]
+    return sorted(rows, key=lambda r: r["applied_at"] or "", reverse=True)
+
+
 def _targets(cfg: Config, db: DB) -> list[Any]:
-    """Недавние отклики в компании из telegram.companies, для которых ссылки на бота ещё нет."""
-    t = cfg.telegram
-    since = (datetime.now() - timedelta(days=t.check_days)).isoformat()
-    names = [c.lower() for c in t.companies]
-    return [r for r in db.by_status("applied", "unconfirmed")
-            if (r["applied_at"] or "") >= since and any(n in (r["company"] or "").lower() for n in names)
-            and not db.tg_link(r["id"])]
+    """Отклики, в чатах hh которых искать ссылку на бота: только пока бот этой компании неизвестен."""
+    known = " ".join(db.tg_link_companies()).lower()
+    names = [c.lower() for c in cfg.telegram.companies if c.lower() not in known]
+    return [r for r in _company_applies(cfg, db)
+            if any(n in (r["company"] or "").lower() for n in names) and not db.tg_link(r["id"])]
 
 
 def find_links(text: str) -> list[tuple[str, str]]:
@@ -239,23 +252,24 @@ def _wait_bot(client, entity, timeout: float) -> bool:
     return False
 
 
-def _vacancy_context(cfg: Config, db: DB, vid: int | None) -> str:
+def _vacancy_context(cfg: Config, db: DB, vid: int | None, survey: str | None) -> str:
     from .analyst import _vacancy_prompt
     row = db.get(vid) if vid else None
     if row:
         return _vacancy_prompt(row)[:6000]
-    recent = [r for r in db.by_status("applied", "unconfirmed")
-              if any(c.lower() in (r["company"] or "").lower() for c in cfg.telegram.companies)][:15]
+    if survey:
+        return f"Вакансия: {survey}\n(описания в базе агента нет — смотри, что о ней пишет бот)"
+    recent = _company_applies(cfg, db)[:15]
     return ("Точно неизвестно, о какой вакансии речь. Недавние отклики в эту компанию:\n"
             + "\n".join(f"- {r['title']} ({r['company']})" for r in recent) if recent else "неизвестна")
 
 
-def _decide(cfg: Config, db: DB, msgs: list, vid: int | None) -> Step:
+def _decide(cfg: Config, db: DB, msgs: list, vid: int | None, survey: str | None) -> Step:
     system = SYSTEM.format(consent=CONSENT if cfg.telegram.accept_consent else "")
     user = (f"<resume>\n{cfg.resume_text().strip()}\n</resume>\n\n"
             f"<facts>\n{cfg.questions.facts.strip() or '—'}\n</facts>\n\n"
             f"<preferences>\n{cfg.analyst.preferences.strip() or '—'}\n</preferences>\n\n"
-            f"<vacancy>\n{_vacancy_context(cfg, db, vid)}\n</vacancy>\n\n"
+            f"<vacancy>\n{_vacancy_context(cfg, db, vid, survey)}\n</vacancy>\n\n"
             "<chat>\n" + "\n".join(_fmt(m) for m in msgs) + "\n</chat>")
     return ask_json(cfg, system, user, Step, purpose="recruiter")
 
@@ -269,27 +283,129 @@ def _log_human(cfg: Config, bot: str, question: str, step: Step) -> None:
                 + (f"  черновик: {step.text}\n" if step.text else ""))
 
 
+_NUM = re.compile(r"^\s*\d+[.)]\s*")
+_NEXT = re.compile(r"^\W*(далее|ещё|еще|вперёд|вперед|next)\W*$", re.I)
+
+
+def _choice(m) -> list[tuple[int, str]] | None:
+    """Список «по какой вакансии продолжить»: [(номер кнопки, название вакансии)], иначе None."""
+    if m.out or "ваканси" not in (m.message or "").lower():
+        return None
+    opts = [(i, _NUM.sub("", b.text).strip()) for i, b in enumerate(_buttons(m))
+            if _NUM.match(b.text) and _btn_kind(b) == ""]
+    return opts or None
+
+
+def _match_vacancy(cfg: Config, db: DB, m, title: str) -> int | None:
+    """Вакансия из базы: по ссылке на hh рядом с названием в списке бота, иначе по названию."""
+    for ent, txt in (m.get_entities_text() if hasattr(m, "get_entities_text") else []):
+        hh = re.search(r"hh\.ru/vacancy/(\d+)", getattr(ent, "url", None) or "")
+        if hh and _norm(txt) == _norm(title) and db.get(int(hh.group(1))):
+            return int(hh.group(1))
+    return next((r["id"] for r in _company_applies(cfg, db) if _norm(r["title"]) == _norm(title)), None)
+
+
+def _handled(state, m) -> bool:
+    """Сообщение бота уже обработано: id не новее last_seen_id и бот не правил его после этого."""
+    if not state or m.id > (state["last_seen_id"] or 0):
+        return False
+    if m.id < state["last_seen_id"] or not m.edit_date:
+        return True
+    return m.edit_date.astimezone().replace(tzinfo=None) <= datetime.fromisoformat(state["updated_at"])
+
+
+def _switch_command(client, entity) -> str | None:
+    """Команда бота «сменить вакансию» из его меню (у ГигаРекрутера — /change_vacancy)."""
+    from telethon import functions
+    try:
+        info = client(functions.users.GetFullUserRequest(entity)).full_user.bot_info
+    except Exception:
+        return None
+    for c in (info.commands or []) if info else []:
+        if re.search(r"ваканс|vacanc", f"{c.command} {c.description}", re.I):
+            return "/" + c.command
+    return None
+
+
+def _want_switch(cfg: Config, db: DB, bot: str) -> bool:
+    """Есть недавний отклик без опроса, сделанный после того, как агент последний раз менял вакансию."""
+    state = db.tg_dialog(bot)
+    since = (state["switched_at"] if state else None) or ""
+    surveys = db.tg_surveys(bot)
+    return any(_norm(r["title"]) not in surveys and (r["applied_at"] or "") > since for r in _company_applies(cfg, db))
+
+
+def _say(bot: str, m, what: str) -> None:
+    console.print(f"  @{bot}: {' '.join((m.message or '').split())[:160]}\n    → {what}", markup=False)
+
+
 def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str:
     """Отвечать боту, пока он спрашивает. Итог: idle (переписки нет) | active | stale | human | done."""
     t = cfg.telegram
-    state = db.tg_dialog(bot)
-    vid = state["vacancy_id"] if state else None
+    switch_cmd: str | None = None
+    pages: set[tuple] = set()  # страницы списка вакансий, уже просмотренные в этом запуске
     for _ in range(t.max_turns):
         msgs = _messages(client, entity, 30)
         if not msgs:
             return "idle"
         last = msgs[-1]
+        state = db.tg_dialog(bot)
         if last.out:  # ждём бота
             if datetime.now(timezone.utc) - last.date > STALE:
                 return "stale"
             if dry_run or not _wait_bot(client, entity, t.wait_reply_seconds):
                 return "active"
             continue
-        state = db.tg_dialog(bot)
-        if state and state["status"] in ("human", "done") and last.id <= state["last_seen_id"]:
-            return state["status"]
+
+        opts = _choice(last)
+        if opts is not None:  # выбор вакансии — решает код, не модель
+            surveys = db.tg_surveys(bot)
+            todo = [(i, title) for i, title in opts if _norm(title) not in surveys]
+            page = tuple(title for _, title in opts)
+            nxt = next((i for i, b in enumerate(_buttons(last)) if _NEXT.match(b.text)), None)
+            if todo:
+                i, title = todo[0]
+                vid = _match_vacancy(cfg, db, last, title)
+                _say(bot, last, f"выбираю вакансию: {title}")
+            elif nxt is not None and page not in pages:
+                pages.add(page)
+                i, title = nxt, None
+                _say(bot, last, "все вакансии на странице пройдены — «Далее»")
+            else:
+                if not _handled(state, last):
+                    _say(bot, last, "по всем вакансиям из списка опрос уже был")
+                    if not dry_run:
+                        db.save_tg_dialog(bot, status="done", last_seen_id=last.id)
+                return "done"
+            log_event(cfg, "recruiter", bot=bot, action="choose", vacancy=title, dry_run=dry_run)
+            if dry_run:
+                return "active"
+            time.sleep(random.uniform(*t.reply_seconds))
+            if title:  # до нажатия: бот правит это же сообщение («Спасибо за выбор вакансии!»)
+                db.save_tg_survey(bot, _norm(title), "active", vid)
+                db.save_tg_dialog(bot, status="active", survey=title, vacancy_id=vid, last_seen_id=last.id)
+            try:
+                last.click(i)
+            except Exception as e:  # бот не ответил на callback — сообщение он мог всё равно изменить
+                console.print(f"    [dim]кнопка: {e}[/]")
+            _wait_bot(client, entity, t.wait_reply_seconds)
+            continue
+
+        if _handled(state, last):
+            if state["status"] in ("done", None) and not dry_run and _want_switch(cfg, db, bot):
+                switch_cmd = switch_cmd or _switch_command(client, entity)
+                if switch_cmd:
+                    console.print(f"  @{bot}: есть отклики без опроса — {switch_cmd}")
+                    db.save_tg_dialog(bot, switched_at=datetime.now().isoformat(timespec="seconds"))
+                    client.send_message(entity, switch_cmd)
+                    _wait_bot(client, entity, t.wait_reply_seconds)
+                    continue
+            return state["status"] or "done"
+
+        survey = state["survey"] if state else None
+        vid = state["vacancy_id"] if state else None
         try:
-            step = _decide(cfg, db, msgs, vid)
+            step = _decide(cfg, db, msgs, vid, survey)
         except LimitReached as e:
             console.print(f"  [yellow]Лимит LLM — продолжу в следующий раз: {e}[/]")
             return "active"
@@ -301,16 +417,21 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 step.reason = {"bad": "модель выбрала несуществующую кнопку", "other": "кнопка открывает ссылку или приложение",
                                "geo": "бот просит геопозицию",
                                "phone": "бот просит номер телефона (telegram.share_contact: false)"}[kind]
-        what = (step.text if step.action == "reply"
-                else f"[{btns[step.button].text}]" if step.action == "button" else step.reason)
-        console.print(f"  @{bot}: {(last.message or '').strip()[:150]}\n    → {step.action}: {what}", markup=False)
-        log_event(cfg, "recruiter", bot=bot, action=step.action, vacancy=vid, dry_run=dry_run)
+        _say(bot, last, f"{step.action}: " + (step.text if step.action == "reply"
+                                              else f"[{btns[step.button].text}]" if step.action == "button"
+                                              else step.reason))
+        log_event(cfg, "recruiter", bot=bot, action=step.action, vacancy=survey or vid, dry_run=dry_run)
         if dry_run:
             return "active"
-        if step.action == "done":
-            db.save_tg_dialog(bot, status="done", last_seen_id=last.id)
-            return "done"
+        if step.action in ("done", "ignore"):
+            if step.action == "done" and survey:
+                db.save_tg_survey(bot, _norm(survey), "done", vid)
+            status = "done" if step.action == "done" or not state else state["status"]
+            db.save_tg_dialog(bot, status=status, last_seen_id=last.id)
+            continue  # следующий круг: сменить вакансию, если есть отклики без опроса
         if step.action == "human":
+            if survey:
+                db.save_tg_survey(bot, _norm(survey), "human", vid)
             db.save_tg_dialog(bot, status="human", last_seen_id=last.id, note=step.missing_fact or step.reason)
             _log_human(cfg, bot, last.message or "", step)
             notify("hh-agent: ответьте боту в Telegram", f"@{bot}: {step.missing_fact or step.reason}")
@@ -321,16 +442,20 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 return "active"
             continue
         time.sleep(random.uniform(*t.reply_seconds))
+        db.save_tg_dialog(bot, status="active", last_seen_id=last.id)  # до ответа: правку сообщения ботом видно по времени
         if step.action == "button":
             try:
                 last.click(step.button, share_phone=t.share_contact or None)
-            except Exception as e:  # бот не ответил на callback — сообщение он мог всё равно изменить
+            except Exception as e:
                 console.print(f"    [dim]кнопка: {e}[/]")
         else:
             client.send_message(entity, step.text)
-        db.save_tg_dialog(bot, status="active", last_seen_id=last.id)
         _wait_bot(client, entity, t.wait_reply_seconds)
     return "active"
+
+
+_STATUS = dict(active="жду бота", stale="бот молчит", human="ждёт вашего ответа", done="опросы пройдены",
+               idle="переписки нет")
 
 
 def run(cfg: Config, db: DB, dry_run: bool = False) -> None:
@@ -366,24 +491,18 @@ def run(cfg: Config, db: DB, dry_run: bool = False) -> None:
                 console.print(f"  [red]@{bot}: такого бота нет[/]")
                 continue
             status = _dialog(cfg, db, client, bot, entity, dry_run)
-            while status in ("idle", "done", "stale"):
-                pending = db.tg_pending(bot)
-                if not pending:
-                    break
-                link = pending[0]
-                row = db.get(link["vacancy_id"])
-                console.print(f"  @{bot}: начинаю опрос — {row['title'] if row else link['vacancy_id']}")
-                if dry_run:
-                    break
-                if link["start_param"]:
+            param = db.tg_start_param(bot)
+            if status == "idle" and not dry_run:  # чата с ботом ещё нет — запускаем по ссылке из hh
+                console.print(f"  @{bot}: запускаю бота по ссылке из hh")
+                if param:
                     from telethon import functions
-                    client(functions.messages.StartBotRequest(bot=entity, peer=entity, start_param=link["start_param"]))
+                    client(functions.messages.StartBotRequest(bot=entity, peer=entity, start_param=param))
                 else:
                     client.send_message(entity, "/start")
-                db.tg_link_started(link["vacancy_id"])
-                db.save_tg_dialog(bot, vacancy_id=link["vacancy_id"], status="active")
                 _wait_bot(client, entity, t.wait_reply_seconds)
                 status = _dialog(cfg, db, client, bot, entity, dry_run)
-            console.print(f"  @{bot}: {dict(active='жду бота', stale='бот молчит', human='ждёт вашего ответа', done='опрос пройден', idle='переписки нет').get(status, status)}")
+            if param and not dry_run:
+                db.tg_links_started(bot)  # переписка есть — ссылка больше не нужна
+            console.print(f"  @{bot}: {_STATUS.get(status, status)}")
     finally:
         client.disconnect()

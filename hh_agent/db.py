@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS vacancies (
 );
 CREATE INDEX IF NOT EXISTS ix_status ON vacancies(status);
 
--- Ссылки на ботов-рекрутеров из чатов hh: pending -> started
+-- Ссылки на ботов-рекрутеров из чатов hh; started — бот уже запущен по ссылке или переписка с ним была
 CREATE TABLE IF NOT EXISTS tg_links (
     vacancy_id  INTEGER PRIMARY KEY,
     bot         TEXT,
@@ -54,7 +54,19 @@ CREATE TABLE IF NOT EXISTS tg_dialogs (
     status       TEXT,
     last_seen_id INTEGER DEFAULT 0,
     note         TEXT,
-    updated_at   TEXT
+    updated_at   TEXT,
+    survey       TEXT,   -- название вакансии текущего опроса
+    switched_at  TEXT    -- когда агент последний раз просил бота сменить вакансию
+);
+-- Опросы по вакансиям у бота, у которого одна переписка на все вакансии: active | human | done
+CREATE TABLE IF NOT EXISTS tg_surveys (
+    bot         TEXT,
+    title       TEXT,
+    vacancy_id  INTEGER,
+    status      TEXT,
+    started_at  TEXT,
+    finished_at TEXT,
+    PRIMARY KEY (bot, title)
 );
 """
 
@@ -75,6 +87,11 @@ class DB:
         if "attempts" not in cols:  # миграция базы, созданной до появления обучения
             self.conn.execute("ALTER TABLE vacancies ADD COLUMN attempts INTEGER DEFAULT 0")
             self.conn.commit()
+        tg_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(tg_dialogs)")}
+        for col in ("survey", "switched_at"):  # таблица появилась раньше этих колонок
+            if col not in tg_cols:
+                self.conn.execute(f"ALTER TABLE tg_dialogs ADD COLUMN {col} TEXT")
+                self.conn.commit()
 
     def exists(self, vid: int) -> bool:
         return self.conn.execute("SELECT 1 FROM vacancies WHERE id=?", (vid,)).fetchone() is not None
@@ -121,14 +138,20 @@ class DB:
                           (vid, bot, start_param, datetime.now().isoformat(timespec="seconds")))
         self.conn.commit()
 
-    def tg_pending(self, bot: str) -> list[sqlite3.Row]:
-        return self.conn.execute("SELECT * FROM tg_links WHERE bot=? AND status='pending' ORDER BY found_at",
-                                 (bot,)).fetchall()
+    def tg_start_param(self, bot: str) -> str | None:
+        """start-код ссылки, если бот по ней ещё не запускался."""
+        r = self.conn.execute("SELECT start_param FROM tg_links WHERE bot=? AND status='pending' ORDER BY found_at",
+                              (bot,)).fetchone()
+        return r[0] if r else None
 
-    def tg_link_started(self, vid: int) -> None:
-        self.conn.execute("UPDATE tg_links SET status='started', started_at=? WHERE vacancy_id=?",
-                          (datetime.now().isoformat(timespec="seconds"), vid))
+    def tg_links_started(self, bot: str) -> None:
+        self.conn.execute("UPDATE tg_links SET status='started', started_at=? WHERE bot=? AND status='pending'",
+                          (datetime.now().isoformat(timespec="seconds"), bot))
         self.conn.commit()
+
+    def tg_link_companies(self) -> list[str]:
+        return [r[0] or "" for r in self.conn.execute(
+            "SELECT DISTINCT v.company FROM tg_links l JOIN vacancies v ON v.id = l.vacancy_id")]
 
     def tg_link_bots(self) -> list[str]:
         return [r[0] for r in self.conn.execute("SELECT DISTINCT bot FROM tg_links")]
@@ -141,6 +164,18 @@ class DB:
         self.conn.execute("INSERT OR IGNORE INTO tg_dialogs (bot) VALUES (?)", (bot,))
         sets = ", ".join(f"{k}=?" for k in fields)
         self.conn.execute(f"UPDATE tg_dialogs SET {sets} WHERE bot=?", (*fields.values(), bot))
+        self.conn.commit()
+
+    def tg_surveys(self, bot: str) -> dict[str, str]:
+        """Название вакансии (в нижнем регистре) → статус опроса."""
+        return {r[0]: r[1] for r in self.conn.execute("SELECT title, status FROM tg_surveys WHERE bot=?", (bot,))}
+
+    def save_tg_survey(self, bot: str, title: str, status: str, vacancy_id: int | None = None) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute("INSERT OR IGNORE INTO tg_surveys (bot, title, vacancy_id, started_at) VALUES (?, ?, ?, ?)",
+                          (bot, title, vacancy_id, now))
+        self.conn.execute("UPDATE tg_surveys SET status=?, finished_at=? WHERE bot=? AND title=?",
+                          (status, now if status == "done" else None, bot, title))
         self.conn.commit()
 
     def stats(self) -> Iterable[tuple[str, int]]:
