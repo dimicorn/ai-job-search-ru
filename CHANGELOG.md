@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.4] - 2026-10-20
+
+### ⚙️ Miscellaneous Tasks
+
+- Align changelog workflow with jet_garden_pre
+
 ## [0.1.3] - 2026-10-20
 
 ### ⚙️ Miscellaneous Tasks
