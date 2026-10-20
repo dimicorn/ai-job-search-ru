@@ -105,6 +105,8 @@ questions:
   enabled: true
   max_fields: 30                     # больше полей в форме — отдать человеку
   confirm_in_review: true            # в review показать ответы и спросить перед отправкой
+  faq: true                          # частые вопросы — ответ из faq_file без LLM (и пополнять его)
+  faq_file: faq.yaml                 # скопируйте faq.example.yaml в faq.yaml
   facts: |
     # Частые вопросы работодателей — заполните своими ответами:
     # Ожидаемая зарплата:

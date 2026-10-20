@@ -87,6 +87,8 @@ class Questions(BaseModel):
     max_fields: int = 30        # больше полей — что-то нестандартное, отдаём человеку
     confirm_in_review: bool = True
     facts: str = ""             # факты о вас, которых нет в резюме (зарплата, срок выхода и т.п.)
+    faq: bool = True            # частые вопросы — ответ из faq_file без вызова LLM (и пополнять его)
+    faq_file: str = "faq.yaml"
 
 
 class Telegram(BaseModel):

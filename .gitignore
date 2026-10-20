@@ -12,3 +12,4 @@ learned.json
 .hh-agent.lock
 .telegram*
 *.db-*
+faq.yaml

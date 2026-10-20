@@ -16,6 +16,7 @@ from typing import Any, Literal
 from playwright.sync_api import Page
 from pydantic import BaseModel
 
+from . import faq
 from .config import Config
 from .llm import ask_json
 
@@ -95,6 +96,7 @@ class QAnswer(BaseModel):
     choices: list[int]
     needs_human: bool
     missing_fact: str
+    reusable: bool
 
 
 class QAnswers(BaseModel):
@@ -120,6 +122,9 @@ radio — один вариант, checkbox — несколько, select — �
   по датам в резюме), мнения и интерес к задачам (выводи из резюме и пожеланий).
   В тексте на месте неизвестного факта поставь «[уточнить]», остальное ответь как обычно;
   для radio/select с неизвестным фактом выбери вариант, но всё равно поставь needs_human.
+- reusable: true, если ответ не зависит от вакансии и подойдёт любому работодателю: зарплатные
+  ожидания, причина поиска, срок выхода, город и переезд, формат и график работы, гражданство,
+  документы; false — если ответ про опыт, задачи или интерес к этой вакансии, и для radio/select/checkbox.
 
 """ + ANSWER_STYLE + """
 
@@ -139,6 +144,27 @@ def looks_like_questions(qs: list[dict[str, Any]]) -> bool:
 
 
 def answer(cfg: Config, questions: list[dict[str, Any]], vacancy: str) -> QAnswers:
+    """Ответы на поля анкеты: частые вопросы — из faq.yaml, остальное — одним запросом к LLM."""
+    known, rest = [], []
+    for x in questions:
+        text = faq.lookup(cfg, x["question"]) if x["type"] in ("textarea", "text") else None
+        if text:
+            known.append(QAnswer(idx=x["idx"], kind="answer", text=text, choices=[], needs_human=False,
+                                 missing_fact="", reusable=False))
+        else:
+            rest.append(x)
+    if not rest:
+        return QAnswers(answers=known)
+    res = _ask(cfg, rest, vacancy)
+    by_idx = {x["idx"]: x for x in rest}
+    for a in res.answers:
+        x = by_idx.get(a.idx)
+        if a.reusable and not a.needs_human and a.kind == "answer" and x and x["type"] in ("textarea", "text"):
+            faq.learn(cfg, x["question"], a.text)
+    return QAnswers(answers=known + res.answers)
+
+
+def _ask(cfg: Config, questions: list[dict[str, Any]], vacancy: str) -> QAnswers:
     q = cfg.questions
     user = (f"<resume>\n{cfg.resume_text().strip()}\n</resume>\n\n"
             f"<facts>\n{q.facts.strip() or '—'}\n</facts>\n\n"
