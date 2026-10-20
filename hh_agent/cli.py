@@ -272,11 +272,24 @@ def _keep_awake() -> None:
         pass  # не macOS — просто работаем дальше
 
 
+def cmd_help(sub: argparse._SubParsersAction) -> None:
+    """Список команд с описаниями и опциями — из тех же определений, что и разбор аргументов."""
+    t = Table("команда", "что делает", "опции", box=None, show_header=False, padding=(0, 2, 0, 0))
+    for act in sub._choices_actions:
+        opts = [x.option_strings[-1] if x.option_strings else f"<{x.dest}>"
+                for x in sub.choices[act.dest]._actions if x.dest != "help"]
+        t.add_row(f"[bold]{act.dest}[/]", act.help or "", " ".join(opts))
+    console.print("Использование: [bold]uv run hh-agent <команда> [опции][/]\n")
+    console.print(t)
+    console.print("\nПодробнее о команде: uv run hh-agent <команда> -h")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="hh-agent", description="Агент откликов на hh.ru и Хабр Карьере")
     p.add_argument("-c", "--config", default="config.yaml")
-    sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("login", help="войти в hh.ru / Хабр Карьеру (один раз, сессия сохраняется)")
+    sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("help", help="показать этот список команд")
+    sub.add_parser("login", help="войти в hh.ru, Хабр Карьеру и Telegram (один раз, сессия сохраняется)")
     s = sub.add_parser("scan", help="найти вакансии по фильтрам и оценить их")
     s.add_argument("--no-analyze", action="store_true")
     sub.add_parser("analyze", help="оценить ещё не оценённые вакансии")
@@ -301,6 +314,9 @@ def main() -> None:
     ls = sub.add_parser("list", help="список вакансий по статусу")
     ls.add_argument("status", choices=["new", "filtered", "scored", "skipped", "applied", "unconfirmed", "manual", "error"])
     a = p.parse_args()
+    if a.cmd in (None, "help"):
+        cmd_help(sub)
+        return
 
     if a.cmd in ("login", "review", "run") and not sys.stdin.isatty():
         raise SystemExit(

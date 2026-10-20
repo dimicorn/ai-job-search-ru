@@ -31,6 +31,7 @@ codex login                           # если Codex CLI ещё не авто�
 ## Использование
 
 ```bash
+uv run hh-agent help       # список всех команд и их опций (или просто uv run hh-agent)
 uv run hh-agent login      # один раз: войти в hh.ru (и Хабр Карьеру, если она есть в searches)
 uv run hh-agent scan       # найти вакансии и оценить их
 uv run hh-agent letters    # переписать письма для оценённых вакансий
