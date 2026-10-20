@@ -223,7 +223,10 @@ def cmd_stats(cfg: Config, db: DB) -> None:
     # Расход LLM (события `llm`, пишутся с версии с учётом токенов).
     llm = [e for e in events if e["kind"] == "llm"]
     tok = lambda e: (e.get("input") or 0) + (e.get("output") or 0)
-    k = lambda n: f"{n / 1000:.0f}k" if n >= 10_000 else f"{n / 1000:.1f}k" if n else "0"
+    k = lambda n: (f"{n / 1e6:.1f}M" if n >= 1_000_000 else f"{n / 1000:.0f}k" if n >= 10_000
+                   else f"{n / 1000:.1f}k" if n else "0")
+    # Модель: из события (пишется с версии с учётом моделей), в старых событиях — только бэкенд.
+    model_of = lambda e: e.get("model") or f"{e.get('backend', '?')}: модель не записана"
     def per_apply(d: str) -> str:
         n = sum(count(d, sent(src)) for src in sites)
         used = sum(tok(e) for e in llm if e["ts"] >= d)
@@ -237,6 +240,19 @@ def cmd_stats(cfg: Config, db: DB) -> None:
         ("  из них из кеша", lambda d: k(sum(e.get("cached") or 0 for e in llm if e["ts"] >= d))),
         ("Токенов на отклик", per_apply),
     ]
+
+    def by_model(m: str):
+        def cell(d: str) -> str:
+            used = [e for e in llm if e["ts"] >= d and model_of(e) == m]
+            if not used:
+                return "—"
+            cost = sum(e.get("cost_usd") or 0 for e in used)
+            return f"{k(sum(tok(e) for e in used))} · {len(used)} выз." + (f" · ${cost:.2f}" if cost else "")
+        return cell
+    models = sorted({model_of(e) for e in llm}, key=lambda m: -sum(tok(e) for e in llm if model_of(e) == m))
+    if models:
+        metrics += [("По моделям (токены · вызовы · $)", lambda d: ""),
+                    *[(f"  {m}", by_model(m)) for m in models]]
     if any(e.get("cost_usd") for e in llm):
         metrics.append(("Стоимость, $", lambda d: f"{sum(e.get('cost_usd') or 0 for e in llm if e['ts'] >= d):.2f}"))
 

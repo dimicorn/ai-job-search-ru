@@ -43,11 +43,11 @@ CODEX_DISABLE = ("browser_use", "browser_use_external", "computer_use", "in_app_
 
 
 def _usage(cfg: Config | None, purpose: str, backend: str, inp: int = 0, cached: int = 0, out: int = 0,
-           cost_usd: float | None = None) -> None:
+           cost_usd: float | None = None, model: str | None = None) -> None:
     if cfg is None:
         return
     from .events import log_event
-    log_event(cfg, "llm", purpose=purpose, backend=backend, input=inp, cached=cached, output=out,
+    log_event(cfg, "llm", purpose=purpose, backend=backend, model=model, input=inp, cached=cached, output=out,
               **({"cost_usd": round(cost_usd, 5)} if cost_usd is not None else {}))
 
 
@@ -239,7 +239,8 @@ def run_openai(system: str, user: str, model: type[T], cfg: Config, purpose: str
         _FORMAT[url] = i
         u = data.get("usage") or {}
         cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
-        _usage(cfg, purpose, "openai", u.get("prompt_tokens", 0), cached, u.get("completion_tokens", 0))
+        _usage(cfg, purpose, "openai", u.get("prompt_tokens", 0), cached, u.get("completion_tokens", 0),
+               model=data.get("model") or a.model)
         try:
             text = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -260,7 +261,7 @@ def run_command(system: str, user: str, model: type[T], cfg: Config, purpose: st
         raise SystemExit(f"analyst.command: не найдена программа {shlex.split(cmd)[0]!r}")
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"{cmd}: нет ответа за 15 минут")
-    _usage(cfg, purpose, "command")
+    _usage(cfg, purpose, "command", model=cmd)
     if r.returncode != 0:
         msg = (r.stderr or r.stdout).strip()[-300:]
         if "limit" in msg.lower() or "quota" in msg.lower():
@@ -300,7 +301,8 @@ def run_codex(prompt: str, model: type[T], codex_model: str | None = None,
                 except json.JSONDecodeError:
                     continue
                 _usage(cfg, purpose, "codex", u.get("input_tokens", 0), u.get("cached_input_tokens", 0),
-                       u.get("output_tokens", 0) + u.get("reasoning_output_tokens", 0))
+                       u.get("output_tokens", 0) + u.get("reasoning_output_tokens", 0),
+                       model=codex_model or "codex: модель по умолчанию")
         try:
             with open(out, encoding="utf-8") as f:
                 return model.model_validate_json(f.read())
@@ -344,7 +346,10 @@ def run_claude_cli(system: str, user: str, model: type[T], cfg: Config, purpose:
     u = d.get("usage") or {}
     _usage(cfg, purpose, "claude_code",
            u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0),
-           u.get("cache_read_input_tokens", 0), u.get("output_tokens", 0), d.get("total_cost_usd"))
+           u.get("cache_read_input_tokens", 0), u.get("output_tokens", 0), d.get("total_cost_usd"),
+           # modelUsage — какие модели реально отвечали; основная — с наибольшим выводом
+           model=max(d.get("modelUsage") or {a.model: {}},
+                     key=lambda m: (d.get("modelUsage") or {}).get(m, {}).get("outputTokens", 0)))
     if d.get("is_error") or not d.get("structured_output"):
         msg = str(d.get("result") or d.get("subtype"))[:300]
         if d.get("api_error_status") == 429 or "limit" in msg.lower():
@@ -381,7 +386,7 @@ def run_api(system: str, user: str, model: type[T], cfg: Config, purpose: str = 
         raise RuntimeError(str(e))
     u = resp.usage
     cr, cc = getattr(u, "cache_read_input_tokens", 0) or 0, getattr(u, "cache_creation_input_tokens", 0) or 0
-    _usage(cfg, purpose, "api", u.input_tokens + cr + cc, cr, u.output_tokens)
+    _usage(cfg, purpose, "api", u.input_tokens + cr + cc, cr, u.output_tokens, model=resp.model)
     if resp.stop_reason == "refusal" or resp.parsed_output is None:
         raise RuntimeError(f"модель не вернула ответ (stop_reason={resp.stop_reason})")
     return resp.parsed_output
