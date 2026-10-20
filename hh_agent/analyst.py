@@ -10,9 +10,10 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from rich.console import Console
 
 from .config import Config
@@ -21,6 +22,19 @@ from .events import log_event
 from .llm import LimitReached, ask_json, run_codex
 
 console = Console()
+
+
+_GREETING = re.compile(r"(здравствуй|добр(ый|ое) (день|вечер|утро)|привет|hello|hi\b|good (morning|afternoon|evening)|dear)",
+                       re.I)
+
+
+def greet(letter: str) -> str:
+    """Письмо всегда начинается с приветствия: если модель его не написала — добавляем."""
+    letter = letter.strip()
+    if not letter or _GREETING.match(letter):
+        return letter
+    latin = len(re.findall(r"[a-z]", letter, re.I)) > len(re.findall(r"[а-яё]", letter, re.I))
+    return ("Hello!" if latin else "Здравствуйте!") + "\n\n" + letter
 
 
 class Score(BaseModel):
@@ -33,9 +47,13 @@ class Score(BaseModel):
 class Assessment(Score):
     cover_letter: str
 
+    _greet = field_validator("cover_letter")(greet)
+
 
 class Letter(BaseModel):
     cover_letter: str
+
+    _greet = field_validator("cover_letter")(greet)
 
 
 # Пачки: обвязка Codex (~12 тыс. токенов) и резюме оплачиваются один раз на пачку, а не на вакансию.
@@ -74,7 +92,8 @@ DESCRIPTION_LIMIT = 5000  # знаков описания вакансии в з
 
 
 LETTER_RULES = """Сопроводительное письмо на русском (на английском — если вакансия на английском),
-500–900 знаков, без приветствий-шаблонов вроде «Уважаемый работодатель».
+500–900 знаков. Начни с приветствия отдельной строкой: «Здравствуйте!» (в английском письме — «Hello!»),
+без обращений-шаблонов вроде «Уважаемый работодатель».
 Свяжи 2–3 конкретных требования вакансии с конкретным опытом из резюме — цифры, проекты, стек.
 Не выдумывай факты, которых нет в резюме. Без воды, без лести, без markdown.
 Закончи готовностью обсудить детали."""
