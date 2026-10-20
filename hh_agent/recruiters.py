@@ -589,7 +589,9 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             if survey:
                 db.save_tg_survey(bot, _norm(survey), "done", vid)
             db.save_tg_dialog(bot, status="done")
-        _wait_bot(client, entity, t.wait_reply_seconds)
+        # После оценки бот обычно молчит (список вакансий он присылает вместе с ней) — не ждём его
+        # две минуты, а сразу идём выбирать следующую вакансию.
+        _wait_bot(client, entity, 5 if step.final else t.wait_reply_seconds)
     return "active"
 
 
