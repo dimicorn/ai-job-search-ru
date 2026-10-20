@@ -106,16 +106,35 @@ def _model(base_url: str, key: str) -> str:
     return _ask("Модель (как в документации сервиса, например из списка выше)", found[0] if len(found) == 1 else None)
 
 
-def _choose(base: Path) -> dict[str, Any]:
-    """Спросить, какую LLM использовать; вернуть значения для раздела analyst."""
-    i = _pick("Какую LLM использовать для оценки вакансий, писем и ответов на вопросы?", [
-        "Codex CLI — по подписке ChatGPT (нужен `codex login`)",
-        "Claude Code CLI — по подписке claude.ai (нужен `claude`)",
-        "Claude API — по ключу ANTHROPIC_API_KEY, оплата по токенам",
-        "OpenAI-совместимый API в облаке — OpenAI, OpenRouter, DeepSeek, Gemini, Mistral, Groq или свой адрес",
-        "Локальная модель — Ollama или LM Studio",
-        "Своя команда — любая программа: запрос в stdin, JSON-ответ в stdout",
-    ])
+LLM_OPTIONS = [
+    "Codex CLI — по подписке ChatGPT (нужен `codex login`)",
+    "Claude Code CLI — по подписке claude.ai (нужен `claude`)",
+    "Claude API — по ключу ANTHROPIC_API_KEY, оплата по токенам",
+    "OpenAI-совместимый API в облаке — OpenAI, OpenRouter, DeepSeek, Gemini, Mistral, Groq или свой адрес",
+    "Локальная модель — Ollama или LM Studio",
+    "Своя команда — любая программа: запрос в stdin, JSON-ответ в stdout",
+]
+
+
+def _fallback(base: Path, main: str) -> dict[str, Any]:
+    """Спросить запасную LLM — на случай, когда у основной кончатся лимиты."""
+    i = _pick("Запасная LLM — на неё агент перейдёт, когда у основной кончатся лимиты:",
+              ["Не нужна — при исчерпании лимитов остановиться", *LLM_OPTIONS])
+    if i == 0:
+        return {"fallback_backend": None, "fallback_settings": {}}
+    v = _choose(base, i - 1)
+    v.pop("letter_backend", None)
+    fb = v.pop("backend")
+    if fb == main:
+        console.print("[yellow]Запасная LLM — тот же бэкенд, что и основная: при исчерпании лимитов "
+                      "она не поможет, если это та же подписка или ключ.[/]")
+    return {"fallback_backend": fb, "fallback_settings": v}
+
+
+def _choose(base: Path, i: int | None = None) -> dict[str, Any]:
+    """Спросить, какую LLM использовать (i — уже выбранный пункт LLM_OPTIONS); вернуть значения для analyst."""
+    if i is None:
+        i = _pick("Какую LLM использовать для оценки вакансий, писем и ответов на вопросы?", LLM_OPTIONS)
     if i == 0:
         if not shutil.which("codex"):
             console.print("[yellow]codex не найден в PATH — установите Codex CLI и выполните `codex login`.[/]")
@@ -157,7 +176,7 @@ def _choose(base: Path) -> dict[str, Any]:
 
 def setup(config_path: Path) -> None:
     from .config import load_config
-    from .llm import ask_json
+    from .llm import ask_backend, fallback_cfg
 
     base = config_path.parent
     if not config_path.exists():
@@ -169,19 +188,24 @@ def setup(config_path: Path) -> None:
             console.print(f"Создан {dst} из {src}.")
 
     values = _choose(base)
+    values.update(_fallback(base, values["backend"]))
     text = config_path.read_text(encoding="utf-8")
     for k, v in values.items():
         text = _set(text, k, v)
     config_path.write_text(text, encoding="utf-8")
     console.print(f"[green]LLM записана в {config_path.name}:[/] " + ", ".join(f"{k}={v}" for k, v in values.items()))
 
-    console.print("Проверяю LLM тестовым запросом…")
     cfg = load_config(config_path)
-    try:
-        ok = ask_json(cfg, "Проверка связи.", 'Верни {"ok": true}.', _Ping, purpose="other").ok
-        console.print("[green]LLM отвечает по схеме — всё готово.[/]" if ok else "[yellow]LLM ответила, но ok=false.[/]")
-    except (SystemExit, Exception) as e:
-        console.print(f"[red]Тестовый запрос не прошёл:[/] {e}\nИсправьте раздел analyst в {config_path.name} "
-                      "или запустите uv run hh-agent setup ещё раз.")
+    checks = [("Основная LLM", cfg, cfg.analyst.backend)]
+    if cfg.analyst.fallback_backend:
+        checks.append(("Запасная LLM", fallback_cfg(cfg), cfg.analyst.fallback_backend))
+    for name, c, backend in checks:
+        console.print(f"{name} ({backend}): проверяю тестовым запросом…")
+        try:
+            ok = ask_backend(c, backend, "Проверка связи.", 'Верни {"ok": true}.', _Ping, "other").ok
+            console.print("[green]отвечает по схеме.[/]" if ok else "[yellow]ответила, но ok=false.[/]")
+        except (SystemExit, Exception) as e:
+            console.print(f"[red]Тестовый запрос не прошёл:[/] {e}\nИсправьте раздел analyst в {config_path.name} "
+                          "или запустите uv run hh-agent setup ещё раз.")
     console.print("\nДальше: заполните resume.md, в config.yaml — searches, analyst.preferences и questions.facts; "
                   "затем uv run hh-agent login.")

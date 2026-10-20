@@ -44,6 +44,7 @@ class Analyst(BaseModel):
     openai_extra: dict[str, Any] = Field(default_factory=dict)  # openai: доп. поля запроса (temperature, reasoning_effort…)
     command: str | None = None    # command: программа, которая читает запрос из stdin и печатает JSON
     fallback_backend: str | None = None  # кончились лимиты основного бэкенда — запросы идут сюда (claude_code…)
+    fallback_settings: dict[str, Any] = Field(default_factory=dict)  # свои model, base_url… для запасного бэкенда
     letter_backend: str = "codex"  # same — письмо в запросе оценки; иначе бэкенд для отдельного запроса письма
     codex_model: str | None = None  # None — модель Codex по умолчанию (~/.codex/config.toml не читается)
     codex_effort: str | None = None  # глубина рассуждения Codex: low | medium | high | xhigh | max; None — по умолчанию модели

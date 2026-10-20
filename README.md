@@ -46,7 +46,9 @@ uv run hh-agent setup      # создаст config.yaml, resume.md, faq.yaml и 
 самая сильная) и `analyst.codex_effort` (`low` … `max`); без них Codex берёт значения по умолчанию.
 
 `analyst.fallback_backend` — запасной бэкенд на случай, когда у основного кончились лимиты,
-например `claude_code` за Codex (модель и глубина — `analyst.model` и `analyst.effort`). Агент
+например `claude_code` за Codex; мастер `setup` спрашивает его сразу после основного. Свои
+`model`, `base_url`, `api_key_env` и другие поля для него — в `analyst.fallback_settings`
+(без них берутся общие из `analyst`). Агент
 сразу повторяет запрос через запасной и работает только с ним до времени сброса лимита из
 ответа (у Codex — «try again at 4:37 PM»), в том числе в следующих запусках (`.llm-limits.json`);
 после этого возвращается к основному. Если время в ответе не указано — до конца запуска. Переключение видно в консоли и в журнале (событие `llm_fallback`).

@@ -65,6 +65,8 @@ analyst:
   effort: medium                     # low | medium | high
   fallback_backend: null             # кончились лимиты (например, у Codex) — запросы идут сюда:
                                      # claude_code, api, openai, command; null — остановиться
+  fallback_settings: {}              # свои поля для запасного, например {"model": "claude-opus-5-5"}
+                                     # или {"base_url": "…", "model": "…", "api_key_env": "…"}
   letter_backend: codex              # same — письмо в том же запросе, что и оценка; имя бэкенда — отдельным
                                      # запросом к нему и только для проходных вакансий
   codex_model: null                  # null — модель Codex по умолчанию; gpt-6-astra — самая сильная

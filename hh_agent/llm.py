@@ -122,11 +122,11 @@ def ask_json(cfg: Config, system: str, user: str, model: type[T], purpose: str =
     b = backend or cfg.analyst.backend
     fb = cfg.analyst.fallback_backend
     if not fb or fb == b:
-        return _ask(cfg, b, system, user, model, purpose)
+        return ask_backend(cfg, b, system, user, model, purpose)
     if _limits(cfg).get(b, 0) > time.time():
-        return _ask(cfg, fb, system, user, model, purpose)
+        return ask_backend(fallback_cfg(cfg), fb, system, user, model, purpose)
     try:
-        return _ask(cfg, b, system, user, model, purpose)
+        return ask_backend(cfg, b, system, user, model, purpose)
     except LimitReached as e:
         until = reset_at(str(e))
         with _limited_lock:
@@ -143,10 +143,17 @@ def ask_json(cfg: Config, system: str, user: str, model: type[T], purpose: str =
             print(f"{b}: кончились лимиты — {when} работаю через {fb}", flush=True)
             log_event(cfg, "llm_fallback", backend=b, fallback=fb, until=f"{until:%Y-%m-%dT%H:%M}" if until else None,
                       reason=str(e)[:300])
-        return _ask(cfg, fb, system, user, model, purpose)
+        return ask_backend(fallback_cfg(cfg), fb, system, user, model, purpose)
 
 
-def _ask(cfg: Config, b: str, system: str, user: str, model: type[T], purpose: str) -> T:
+def fallback_cfg(cfg: Config) -> Config:
+    """Конфиг для запасного бэкенда: поля analyst из analyst.fallback_settings (model, base_url, api_key_env…)."""
+    if not cfg.analyst.fallback_settings:
+        return cfg
+    return cfg.model_copy(update={"analyst": cfg.analyst.model_copy(update=cfg.analyst.fallback_settings)})
+
+
+def ask_backend(cfg: Config, b: str, system: str, user: str, model: type[T], purpose: str) -> T:
     if b == "codex":
         return run_codex(f"{system}\n{NO_TOOLS}\n\n{user}", model, cfg.analyst.codex_model, cfg, purpose)
     if b == "claude_code":
