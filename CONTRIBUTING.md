@@ -26,6 +26,9 @@
 
 ## Релизы и CHANGELOG
 
+Версию пакета задаёт git-тег (hatch-vcs): на теге `v0.2.0` это `0.2.0`, после него —
+`0.2.1.devN+g<коммит>`; в `pyproject.toml` её править не нужно, текущая — `uv run hh-agent --version`.
+
 CHANGELOG.md собирает git-cliff по `cliff.toml` из истории коммитов. При push тега вида `v0.2.0`
 workflow `.github/workflows/changelog.yml` обновляет файл и сам коммитит его в `main`
 (после этого сделайте `git pull`):

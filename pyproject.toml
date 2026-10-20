@@ -1,6 +1,6 @@
 [project]
 name = "hh-agent"
-version = "0.1.0"
+dynamic = ["version"]  # из git-тега vX.Y.Z (hatch-vcs)
 description = "Агент откликов на hh.ru: поиск по фильтрам, оценка и письма через LLM, автоотклики с ответами на вопросы работодателя"
 requires-python = ">=3.11"
 license = "MIT"
@@ -18,8 +18,11 @@ dependencies = [
 hh-agent = "hh_agent.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
 
 [dependency-groups]
 dev = [

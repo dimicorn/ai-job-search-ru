@@ -299,8 +299,17 @@ def cmd_help(sub: argparse._SubParsersAction) -> None:
     console.print("\nПодробнее о команде: uv run hh-agent <команда> -h")
 
 
+def _version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("hh-agent")
+    except PackageNotFoundError:
+        return "?"
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="hh-agent", description="Агент откликов на hh.ru и Хабр Карьере")
+    p.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     p.add_argument("-c", "--config", default="config.yaml")
     sub = p.add_subparsers(dest="cmd")
     sub.add_parser("help", help="показать этот список команд")
