@@ -238,5 +238,8 @@ uv run hh-agent recruiters             # пройти опросы сейчас
   На каждый push в `main` и pull request проверка идёт в GitHub Actions (`.github/workflows/lint.yml`).
 - CHANGELOG.md собирает git-cliff по `cliff.toml` из истории коммитов: при push тега вида `v0.2.0`
   (`git tag v0.2.0 && git push origin v0.2.0`) workflow `changelog.yml` обновляет файл и коммитит его
-  в `main`. Группы («Added», «Fixed», «Removed», «Changed») — по первому слову сообщения коммита.
-  Посмотреть заранее: `uvx git-cliff --unreleased`.
+  в `main`. Коммиты пишутся по [Conventional Commits](https://www.conventionalcommits.org/ru/):
+  `feat: …`, `fix: …`, `docs: …`, `refactor: …`, `ci: …` — по префиксу коммит попадает в раздел,
+  а коммиты без префикса в CHANGELOG не попадают.
+  Посмотреть заранее: `uvx git-cliff --offline --unreleased` (`--offline` — без запросов к GitHub API,
+  которому для приватного репозитория нужен токен).
