@@ -294,7 +294,10 @@ def _telegram(cfg: Config, dry_run: bool, cdp_port: int, others: list[threading.
                 _log(f"[red]Telegram: {e}[/]")
         if not alive:
             return
-        time.sleep(30)
+        for _ in range(30):  # через 30 с проверить новые отклики, но закончить сразу, как закончат остальные
+            if not any(t.is_alive() for t in others):
+                break
+            time.sleep(1)
 
 
 def run_auto(cfg: Config, db: DB, dry_run: bool = False, limit: int | None = None,

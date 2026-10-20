@@ -370,6 +370,16 @@ def _current_survey(msgs: list) -> str | None:
     return None
 
 
+# «Подождите» без вопроса — ждём следующего сообщения сами, без вызова LLM (ГигаРекрутер пишет так
+# после каждого выбора вакансии).
+_WAIT_TEXT = re.compile(r"дайте мне несколько секунд|подождите,? пожалуйста|одну (секунду|минуту)|секундочку", re.I)
+
+
+def _just_wait(m) -> bool:
+    text = m.message or ""
+    return bool(_WAIT_TEXT.search(text)) and "?" not in text and not _buttons(m)
+
+
 PENDING_AGE = timedelta(days=3)  # вопрос бота старше этого без ответа уже не поднимаем
 
 
@@ -473,6 +483,15 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 if state["status"] in ("done", None) and switch():
                     continue
                 return state["status"] or "done"
+
+        if hanging is None and _just_wait(last):
+            _say(bot, last, "жду следующего сообщения бота")
+            if dry_run:
+                return "active"
+            db.save_tg_dialog(bot, last_seen_id=last.id)
+            if not _wait_bot(client, entity, t.wait_reply_seconds):
+                return "active"
+            continue
 
         target = hanging or last  # на какое сообщение бота отвечаем
         survey = state["survey"] if state else None
