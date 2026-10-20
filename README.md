@@ -26,7 +26,9 @@ codex login                           # если Codex CLI ещё не авто�
 отдельно платить не нужно. Бэкенд меняется в `config.yaml`: `analyst.backend` — `codex`,
 `claude_code` (`claude -p`, подписка claude.ai) или `api` (Claude API по `ANTHROPIC_API_KEY`).
 `analyst.letter_backend: codex` — письма пишутся отдельным запросом и только для вакансий
-с проходным баллом.
+с проходным баллом. Модель и глубину рассуждения Codex задают `analyst.codex_model`
+(например, `gpt-6-astra` — самая сильная) и `analyst.codex_effort` (`low` … `max`); без них
+Codex берёт модель и уровень по умолчанию.
 
 ## Использование
 

@@ -41,6 +41,7 @@ class Analyst(BaseModel):
     effort: str = "medium"
     letter_backend: str = "codex"  # codex — письма пишет `codex exec`; same — та же модель Claude
     codex_model: str | None = None  # None — модель Codex по умолчанию (~/.codex/config.toml не читается)
+    codex_effort: str | None = None  # глубина рассуждения Codex: low | medium | high | xhigh | max; None — по умолчанию модели
     batch_size: int = 8          # вакансий на один вызов оценки
     letter_batch_size: int = 4   # писем на один вызов
     min_score: int = 70

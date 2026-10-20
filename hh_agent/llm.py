@@ -79,6 +79,8 @@ def run_codex(prompt: str, model: type[T], codex_model: str | None = None,
             cmd += ["--disable", f]
         if codex_model:
             cmd += ["-m", codex_model]
+        if cfg and cfg.analyst.codex_effort:
+            cmd += ["-c", f'model_reasoning_effort="{cfg.analyst.codex_effort}"']
         cmd.append("-")
         try:
             r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=600)
