@@ -15,8 +15,6 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from rich.console import Console
-
 from . import analyst as analyst_mod
 from . import recruiters
 from .applier import Applier, Mode
@@ -25,15 +23,14 @@ from .config import Config
 from .db import DB
 from .events import log_event
 from .learning import Store, learn
+from .log import console
 from .scout import scan
-
-console = Console()
 
 
 def _log(msg: str) -> None:
-    name = threading.current_thread().name
-    tag = "" if name == "MainThread" else f"[bold]{name}[/] "
-    console.print(f"[dim]{datetime.now():%H:%M:%S}[/] {tag}{msg}")
+    """Строка со временем: в рабочих потоках время и имя потока добавляет сама консоль (log.py)."""
+    main = threading.current_thread() is threading.main_thread()
+    console.print(f"[dim]{datetime.now():%H:%M:%S}[/] {msg}" if main else msg)
 
 
 def _thread(target, *args, name: str) -> threading.Thread:
@@ -261,6 +258,19 @@ def _scan_worker(cfg: Config, src: str, cdp_port: int, found: list[int]) -> None
         found.append(scan(cfg, db, page, {src}))
 
 
+def _section(thread: str, sites: list[str]) -> str | None:
+    """Блок вывода по имени потока: поиск и отклики сайта — в блок сайта, Telegram — в свой,
+    оценка (общая для сайтов, её потоки LLM_*) — в первый блок."""
+    if thread == "Telegram":
+        return "tg"
+    for s in sites:
+        if SITES[s] in thread:
+            return s
+    if thread == "поиск-оценка" or thread.startswith("LLM"):
+        return sites[0] if sites else None
+    return None
+
+
 def _produce(cfg: Config, run: Run, cdp_port: int) -> None:
     """Поиск на всех сайтах параллельно, затем оценка и письма (Codex — несколькими запросами сразу)."""
     try:
@@ -350,10 +360,19 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
         workers = list(threads)
         if cfg.telegram.enabled:
             threads.append(_thread(_telegram, cfg, dry_run, port, workers, name="Telegram"))
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        # Работа — параллельно, вывод — блоками: hh.ru, потом Хабр Карьера, потом Telegram.
+        sites = sorted(cfg.sources(), key=lambda s: list(SITES).index(s) if s in SITES else len(SITES))
+        order = [(s, SITES[s]) for s in sites] + ([("tg", "AI-рекрутеры в Telegram")] if cfg.telegram.enabled else [])
+        with console.sequential(order, lambda name: _section(name, sites)):
+            for t in threads:
+                t.start()
+            for key, _ in order:
+                for t in threads:
+                    if _section(t.name, sites) == key:
+                        t.join()
+                console.section_done(key)
+            for t in threads:
+                t.join()
 
     stop_reason = run.stop_reason or "кандидаты закончились"
     log_event(cfg, "auto_end", dry_run=dry_run, done=run.done, stop_reason=stop_reason,

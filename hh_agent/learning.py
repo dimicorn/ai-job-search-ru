@@ -19,13 +19,11 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel
-from rich.console import Console
 
 from .config import Config
 from .events import SESSION, log_event, read_events
 from .llm import ask_json
-
-console = Console()
+from .log import console
 
 DEFAULT_TUNING = {"pace_multiplier": 1.0, "form_timeout_ms": 15000, "confirm_timeout_ms": 15000}
 BOUNDS = {"pace_multiplier": (1.0, 3.0), "form_timeout_ms": (8000, 30000), "confirm_timeout_ms": (8000, 30000)}

@@ -21,7 +21,6 @@ from pathlib import Path
 
 from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PWTimeout
-from rich.console import Console
 from rich.panel import Panel
 
 from . import questions
@@ -30,8 +29,7 @@ from .config import Config
 from .events import SESSION, log_event
 from .learning import Store
 from .llm import LimitReached
-
-console = Console()
+from .log import console
 
 SEL = {
     "respond": "[data-qa='vacancy-response-link-top']",

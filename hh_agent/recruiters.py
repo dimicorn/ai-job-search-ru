@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import random
 import re
-import threading
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -27,7 +26,6 @@ from urllib.parse import unquote
 
 from playwright.sync_api import Page
 from pydantic import BaseModel
-from rich.console import Console
 
 from . import faq
 from .browser import HH, CaptchaError, attach, check_captcha, notify, open_browser
@@ -35,22 +33,8 @@ from .config import Config
 from .db import DB
 from .events import log_event
 from .llm import LimitReached, ask_json
+from .log import console
 from .questions import ANSWER_STYLE
-
-
-class _Console(Console):
-    """В autopilot опросы идут в своём потоке: строки — со временем и именем потока, как у остальных."""
-
-    def print(self, *objects, **kwargs) -> None:
-        name = threading.current_thread().name
-        if name != "MainThread" and objects and isinstance(objects[0], str):
-            tag = (f"{datetime.now():%H:%M:%S} {name} " if kwargs.get("markup") is False
-                   else f"[dim]{datetime.now():%H:%M:%S}[/] [bold]{name}[/] ")
-            objects = (tag + objects[0], *objects[1:])
-        super().print(*objects, **kwargs)
-
-
-console = _Console()
 
 # Только боты (username кончается на bot): каналы вроде t.me/sbercareers не трогаем.
 LINK_RE = re.compile(r"(?:t\.me|telegram\.me)/([A-Za-z0-9_]{2,}bot)\b(?:/?\?start=([\w-]+))?"

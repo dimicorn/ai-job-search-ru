@@ -12,15 +12,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
-from rich.console import Console
 
 from .config import Config
 from .db import DB, dec_list
 from .events import log_event
 from .llm import BACKENDS, LimitReached, ask_json
-
-console = Console()
-
+from .log import console
 
 _GREETING = re.compile(r"(здравствуй|добр(ый|ое) (день|вечер|утро)|привет|hello|hi\b|good (morning|afternoon|evening)|dear)",
                        re.I)
@@ -249,7 +246,7 @@ def _chunks(seq, n):
 def _in_parallel(cfg: Config, fn, chunks):
     """fn(пачка) для всех пачек сразу — до analyst.parallel запросов к LLM одновременно.
     Выдаёт (пачка, результат, ошибка) по мере готовности; после LimitReached новые запросы не начинает."""
-    with ThreadPoolExecutor(max_workers=max(1, cfg.analyst.parallel)) as ex:
+    with ThreadPoolExecutor(max_workers=max(1, cfg.analyst.parallel), thread_name_prefix="LLM") as ex:
         futs = {ex.submit(fn, c): c for c in chunks}
         for f in as_completed(futs):
             if f.cancelled():

@@ -7,14 +7,12 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from playwright.sync_api import Page
-from rich.console import Console
 
 from .browser import HABR, HH, SITES, check_captcha, page_state, pause
 from .config import Config, Filters, Search
 from .db import DB
 from .events import log_event
-
-console = Console()
+from .log import console
 
 # Найденная карточка: (id вакансии, поля для базы, уже откликались ли).
 Card = tuple[int, dict[str, Any], bool]

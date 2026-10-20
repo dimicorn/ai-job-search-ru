@@ -9,7 +9,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
@@ -21,10 +20,8 @@ from .browser import LOGIN_URL, SITES, SiteTabs, is_logged_in, open_browser, pau
 from .config import Config, load_config
 from .db import DB, dec_list
 from .learning import learn, report
+from .log import console
 from .scout import scan
-
-console = Console()
-
 
 LOGIN_HINT = {"hh": "как соискатель", "habr": "через Хабр Аккаунт"}
 

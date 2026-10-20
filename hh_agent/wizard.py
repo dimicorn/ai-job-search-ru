@@ -16,9 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
-from rich.console import Console
 
-console = Console()
+from .log import console
 
 # Облачные OpenAI-совместимые API: (название, base_url, переменная с ключом).
 CLOUD = [
