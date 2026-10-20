@@ -88,4 +88,5 @@ else
 fi
 
 say "Готово"
+echo "Проверить, всё ли готово: uv run hh-agent doctor (с --online — ещё вход на сайты и LLM)."
 echo "Команды: uv run hh-agent help · прогон вручную: uv run hh-agent autopilot · статистика: uv run hh-agent stats"

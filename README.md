@@ -41,7 +41,8 @@ git clone https://github.com/dimicorn/job_search_agent.git hh-agent && cd hh-age
 и Chromium для Playwright, запускает мастер `hh-agent setup` (создаст `config.yaml`, `resume.md`,
 `faq.yaml`, спросит основную и запасную LLM и частые факты для анкет — зарплату, город, срок выхода),
 предлагает войти на hh.ru, Хабр Карьеру и в Telegram, скачать резюме с hh.ru в `resume.md` и включить
-ежедневный autopilot. Повторный запуск безопасен: готовое он не трогает.
+ежедневный autopilot. Повторный запуск безопасен: готовое он не трогает. В конце проверьте всё
+командой `uv run hh-agent doctor`.
 
 Вручную то же самое: `uv sync && uv run playwright install chromium && uv run hh-agent setup`,
 затем `uv run hh-agent login`. При первом запуске любой команды без `config.yaml` мастер откроется сам.
@@ -50,6 +51,7 @@ git clone https://github.com/dimicorn/job_search_agent.git hh-agent && cd hh-age
 
 ```bash
 uv run hh-agent help       # список всех команд и их опций (или просто uv run hh-agent)
+uv run hh-agent doctor     # проверить, всё ли готово, и подсказать, как починить (--online — ещё вход и LLM)
 uv run hh-agent login      # один раз: войти в hh.ru (и Хабр Карьеру, если она есть в searches)
 uv run hh-agent resume     # скачать резюме с hh.ru в resume.md (без ФИО и контактов)
 uv run hh-agent scan       # найти вакансии и оценить их

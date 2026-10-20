@@ -341,6 +341,8 @@ def main() -> None:
     sub.add_parser("help", help="показать этот список команд")
     sub.add_parser("setup", help="настройка: создать config.yaml и выбрать LLM (Codex, Claude, OpenAI-совместимый API, локальная)")
     sub.add_parser("login", help="войти в hh.ru, Хабр Карьеру и Telegram (один раз, сессия сохраняется)")
+    dr = sub.add_parser("doctor", help="проверить, всё ли готово к работе, и подсказать, как починить")
+    dr.add_argument("--online", action="store_true", help="ещё вход на сайты и в Telegram и тестовый запрос к LLM")
     rs = sub.add_parser("resume", help="скачать резюме с hh.ru в resume.md (без ФИО и контактов)")
     rs.add_argument("--force", action="store_true", help="перезаписать заполненный resume.md (старый — в .bak)")
     s = sub.add_parser("scan", help="найти вакансии по фильтрам и оценить их")
@@ -372,6 +374,9 @@ def main() -> None:
         return
 
     config_path = Path(a.config).expanduser().resolve()
+    if a.cmd == "doctor":  # работает и без конфига — подскажет, что его нет
+        from .doctor import run as doctor
+        raise SystemExit(doctor(config_path, online=a.online))
     if a.cmd == "setup" or not config_path.exists():
         if not sys.stdin.isatty():
             raise SystemExit(f"Не найден {config_path.name}: запустите в терминале uv run hh-agent setup.")
