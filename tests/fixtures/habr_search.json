@@ -1,0 +1,99 @@
+{
+ "list": [
+  {
+   "id": 1000169379,
+   "title": "Руководитель отдела роботов-манипуляторов (Автоматизация)",
+   "company": {
+    "id": 1000085228,
+    "title": "RWB",
+    "href": "/companies/rwb"
+   },
+   "salary": {
+    "from": null,
+    "to": null,
+    "currency": null,
+    "formatted": ""
+   },
+   "locations": [
+    {
+     "title": "Москва",
+     "href": "/vacancies?city_id=678"
+    }
+   ],
+   "remoteWork": true,
+   "href": "/vacancies/1000169379",
+   "salaryQualification": null,
+   "response": {
+    "kind": "direct"
+   }
+  },
+  {
+   "id": 1000169181,
+   "title": "AI инженер",
+   "company": {
+    "id": 1000094266,
+    "title": "S7 Techlab",
+    "href": "/companies/s7techlab"
+   },
+   "salary": {
+    "from": null,
+    "to": null,
+    "currency": null,
+    "formatted": ""
+   },
+   "locations": [
+    {
+     "title": "Москва",
+     "href": "/vacancies?city_id=678"
+    }
+   ],
+   "remoteWork": false,
+   "href": "/vacancies/1000169181",
+   "salaryQualification": {
+    "title": "Средний (Middle)",
+    "href": "/vacancies?qid=4"
+   },
+   "response": {
+    "kind": "direct"
+   }
+  },
+  {
+   "id": 1000168340,
+   "title": "ML Engineer \"Search\"",
+   "company": {
+    "id": 1000087633,
+    "title": "Okko",
+    "href": "/companies/okko"
+   },
+   "salary": {
+    "from": null,
+    "to": null,
+    "currency": null,
+    "formatted": ""
+   },
+   "locations": [
+    {
+     "title": "Москва",
+     "href": "/vacancies?city_id=678"
+    },
+    {
+     "title": "Санкт-Петербург",
+     "href": "/vacancies?city_id=679"
+    }
+   ],
+   "remoteWork": true,
+   "href": "/vacancies/1000168340",
+   "salaryQualification": {
+    "title": "Старший (Senior)",
+    "href": "/vacancies?qid=5"
+   },
+   "response": {
+    "kind": "direct"
+   }
+  }
+ ],
+ "meta": {
+  "totalResults": 21,
+  "perPage": 25
+ }
+}

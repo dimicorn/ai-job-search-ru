@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Синтетическая форма отклика по образцу модального окна hh.ru: выбор резюме и письмо агент
+     пропускает, вопросы работодателя — разбирает (questions.extract). Личных данных нет. -->
+<html lang="ru">
+<body>
+<main>
+  <form><input type="text" name="search" placeholder="Поиск по сайту"></form>
+  <div role="dialog" data-qa="vacancy-response-popup">
+    <h2>Отклик на вакансию «ML Engineer»</h2>
+    <div data-qa="resume-select">
+      <label><input type="radio" name="resumeHash" value="r1" checked> ML-инженер</label>
+    </div>
+    <textarea data-qa="vacancy-response-popup-form-letter-input" name="letter"></textarea>
+
+    <div class="question">
+      <p>Сколько лет вы работаете с PyTorch?</p>
+      <input type="text" name="task_1" placeholder="Ваш ответ">
+    </div>
+    <div class="question">
+      <p>Какой формат работы вам подходит?</p>
+      <label><input type="radio" name="task_2" value="a"> Офис</label>
+      <label><input type="radio" name="task_2" value="b"> Гибрид</label>
+      <label><input type="radio" name="task_2" value="c"> Удалённо</label>
+    </div>
+    <div class="question">
+      <p>С какими фреймворками работали?</p>
+      <label><input type="checkbox" name="task_3" value="1"> PyTorch</label>
+      <label><input type="checkbox" name="task_3" value="2"> TensorFlow</label>
+      <label><input type="checkbox" name="task_3" value="3"> JAX</label>
+    </div>
+    <div class="question">
+      <label for="city">Город проживания</label>
+      <select id="city" name="task_4"><option>Москва</option><option>Санкт-Петербург</option></select>
+    </div>
+    <div class="question">
+      <label><input type="checkbox" name="consent" value="yes"> Согласен на обработку персональных данных</label>
+    </div>
+    <button type="submit">Откликнуться</button>
+  </div>
+</main>
+</body>
+</html>

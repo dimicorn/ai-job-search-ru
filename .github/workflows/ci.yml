@@ -39,5 +39,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      - name: Install Chromium for browser tests
+        run: uv run playwright install --with-deps chromium
+
       - name: Pytest
         run: uv run pytest -q

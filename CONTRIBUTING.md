@@ -14,6 +14,11 @@
 - **Тесты** — pytest: `uv run pytest`. Сеть, браузер, LLM и Telegram в тестах подменены, конфиг
   и база — во временной папке (`tests/conftest.py`), поэтому ваши `config.yaml`, журнал и база
   не трогаются. Подставной бот для сценариев с AI-рекрутером — `FakeBot` там же.
+- **Образцы страниц** — разбор выдачи и вакансий hh.ru и Хабра (`scout.parse_*`) проверяется на
+  `tests/fixtures/*.json`, снятых с живых сайтов. Сайт поменял разметку — обновите образцы:
+  `uv run python tests/fixtures/refresh.py` (нужен вход в профиле браузера агента; сохраняются только
+  публичные поля вакансий), затем `uv run pytest` покажет, что сломалось. Форма отклика
+  (`hh_response_form.html`) и выгрузка резюме (`hh_resume_export.html`) — синтетические, по разметке hh.
 - **CI** — на каждый push в `main` и pull request GitHub Actions (`.github/workflows/ci.yml`)
   запускает ruff и тесты на Ubuntu и macOS.
 

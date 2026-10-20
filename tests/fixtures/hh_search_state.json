@@ -1,0 +1,118 @@
+{
+ "vacancySearchResult": {
+  "totalResults": 131,
+  "vacancies": [
+   {
+    "vacancyId": 138664756,
+    "name": "ML Engineer Middle",
+    "company": {
+     "id": 5167287,
+     "name": "РостДжоб",
+     "visibleName": "РостДжоб"
+    },
+    "compensation": {
+     "from": 200000,
+     "to": 200000,
+     "currencyCode": "RUR",
+     "gross": false,
+     "perModeFrom": 200000,
+     "perModeTo": 200000,
+     "mode": "MONTH",
+     "frequency": "TWICE_PER_MONTH"
+    },
+    "area": {
+     "@id": 1,
+     "name": "Moscow",
+     "path": ".113.232.1."
+    },
+    "links": {
+     "desktop": "https://hh.ru/vacancy/138664756",
+     "mobile": "https://m.hh.ru/vacancy/138664756"
+    },
+    "workExperience": "between3And6",
+    "workFormats": [
+     {
+      "workFormatsElement": [
+       "REMOTE"
+      ]
+     }
+    ],
+    "userTestPresent": false,
+    "@responseLetterRequired": false,
+    "userLabels": []
+   },
+   {
+    "vacancyId": 138664695,
+    "name": "Strong middle / middle+ backend/fullstack ML Engineer",
+    "company": {
+     "id": 11503634,
+     "name": "KOLOBOX",
+     "visibleName": "KOLOBOX"
+    },
+    "compensation": {
+     "from": 200000,
+     "to": 300000,
+     "currencyCode": "RUR",
+     "gross": true,
+     "perModeFrom": 200000,
+     "perModeTo": 300000,
+     "mode": "MONTH",
+     "frequency": "TWICE_PER_MONTH"
+    },
+    "area": {
+     "@id": 1,
+     "name": "Moscow",
+     "path": ".113.232.1."
+    },
+    "links": {
+     "desktop": "https://hh.ru/vacancy/138664695",
+     "mobile": "https://m.hh.ru/vacancy/138664695"
+    },
+    "workExperience": "between3And6",
+    "workFormats": [
+     {
+      "workFormatsElement": [
+       "REMOTE",
+       "HYBRID"
+      ]
+     }
+    ],
+    "userTestPresent": false,
+    "@responseLetterRequired": false,
+    "userLabels": []
+   },
+   {
+    "vacancyId": 138662464,
+    "name": "Дата-аналитик (Data Quality / ETL), Junior+/Middle",
+    "company": {
+     "id": 1151393,
+     "name": "Футбольный клуб Динамо-Москва",
+     "visibleName": "Футбольный клуб Динамо-Москва"
+    },
+    "compensation": {
+     "noCompensation": {}
+    },
+    "area": {
+     "@id": 1,
+     "name": "Moscow",
+     "path": ".113.232.1."
+    },
+    "links": {
+     "desktop": "https://hh.ru/vacancy/138662464",
+     "mobile": "https://m.hh.ru/vacancy/138662464"
+    },
+    "workExperience": "between1And3",
+    "workFormats": [
+     {
+      "workFormatsElement": [
+       "HYBRID"
+      ]
+     }
+    ],
+    "userTestPresent": false,
+    "@responseLetterRequired": false,
+    "userLabels": []
+   }
+  ]
+ }
+}

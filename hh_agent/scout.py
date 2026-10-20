@@ -83,10 +83,11 @@ def html_to_text(s: str) -> str:
 
 
 # ── hh.ru ─────────────────────────────────────────────────────────────
-def hh_search_page(page: Page, s: Search, n: int) -> tuple[int | None, list[Card]]:
-    page.goto(search_url(s, n), wait_until="domcontentloaded")
-    check_captcha(page)
-    res = (page_state(page) or {}).get("vacancySearchResult") or {}
+# Разбор отделён от браузера: parse_* получают состояние страницы (page_state) или ответ API и
+# проверяются тестами на сохранённых образцах (tests/fixtures, обновление — tests/fixtures/refresh.py).
+def parse_hh_search(state: dict[str, Any]) -> tuple[int | None, list[Card]]:
+    """Выдача hh: state — состояние страницы поиска."""
+    res = (state or {}).get("vacancySearchResult") or {}
     cards = []
     for v in res.get("vacancies") or []:
         vid = int(v["vacancyId"])
@@ -105,19 +106,31 @@ def hh_search_page(page: Page, s: Search, n: int) -> tuple[int | None, list[Card
     return res.get("totalResults"), cards
 
 
-def hh_fetch_details(page: Page, vid: int) -> dict[str, Any] | None:
-    page.goto(f"{HH}/vacancy/{vid}", wait_until="domcontentloaded")
+def hh_search_page(page: Page, s: Search, n: int) -> tuple[int | None, list[Card]]:
+    page.goto(search_url(s, n), wait_until="domcontentloaded")
     check_captcha(page)
-    st = page_state(page) or {}
-    v = (((st.get("vacancyView") or {}).get("vacancyFull") or {}).get("vacancy")) or {}
+    return parse_hh_search(page_state(page) or {})
+
+
+def parse_hh_vacancy(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Страница вакансии hh: описание, навыки, закрыта ли (отклик уже был — смотрит hh_fetch_details)."""
+    v = ((((state or {}).get("vacancyView") or {}).get("vacancyFull") or {}).get("vacancy")) or {}
     if not v:
         return None
     return {
         "description": html_to_text(v.get("description", "")),
         "key_skills": v.get("keySkills") or [],
         "closed": bool(v.get("closedForApplicants") or (v.get("status") or {}).get("archived")),
-        "responded": page.locator("[data-qa='vacancy-response-link-view-topic']").count() > 0,
     }
+
+
+def hh_fetch_details(page: Page, vid: int) -> dict[str, Any] | None:
+    page.goto(f"{HH}/vacancy/{vid}", wait_until="domcontentloaded")
+    check_captcha(page)
+    d = parse_hh_vacancy(page_state(page) or {})
+    if d is not None:
+        d["responded"] = page.locator("[data-qa='vacancy-response-link-view-topic']").count() > 0
+    return d
 
 
 # ── Хабр Карьера ──────────────────────────────────────────────────────
@@ -128,14 +141,10 @@ def habr_search_url(s: Search, page_no: int) -> str:
     return url if has_type else f"{url}&type=all"  # all — все вакансии, а не только «подходящие»
 
 
-def habr_search_page(page: Page, s: Search, n: int) -> tuple[int | None, list[Card]]:
-    # Запрос идёт с куками профиля — тогда в response.kind видно, откликались ли вы уже.
-    res = page.request.get(habr_search_url(s, n))
-    if not res.ok:
-        raise RuntimeError(f"Хабр Карьера: HTTP {res.status} на странице выдачи {n + 1}")
-    data = res.json()
+def parse_habr_search(data: dict[str, Any]) -> tuple[int | None, list[Card]]:
+    """Выдача Хабр Карьеры: data — ответ JSON API /api/frontend/vacancies."""
     cards = []
-    for v in data.get("list") or []:
+    for v in (data or {}).get("list") or []:
         sal = v.get("salary") or {}
         locs = ", ".join(x.get("title", "") for x in v.get("locations") or [])
         cards.append((int(v["id"]), dict(
@@ -150,13 +159,20 @@ def habr_search_page(page: Page, s: Search, n: int) -> tuple[int | None, list[Ca
             has_test=False,
             letter_required=False,
         ), (v.get("response") or {}).get("kind") == "applied"))
-    return (data.get("meta") or {}).get("totalResults"), cards
+    return ((data or {}).get("meta") or {}).get("totalResults"), cards
 
 
-def habr_fetch_details(page: Page, vid: int) -> dict[str, Any] | None:
-    page.goto(f"{HABR}/vacancies/{vid}", wait_until="domcontentloaded")
-    check_captcha(page)
-    st = page_state(page) or {}
+def habr_search_page(page: Page, s: Search, n: int) -> tuple[int | None, list[Card]]:
+    # Запрос идёт с куками профиля — тогда в response.kind видно, откликались ли вы уже.
+    res = page.request.get(habr_search_url(s, n))
+    if not res.ok:
+        raise RuntimeError(f"Хабр Карьера: HTTP {res.status} на странице выдачи {n + 1}")
+    return parse_habr_search(res.json())
+
+
+def parse_habr_vacancy(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Страница вакансии Хабр Карьеры: state — состояние страницы (page_state)."""
+    st = state or {}
     v = st.get("vacancy") or {}
     if not v:
         return None
@@ -167,6 +183,12 @@ def habr_fetch_details(page: Page, vid: int) -> dict[str, Any] | None:
         "responded": (v.get("response") or {}).get("kind") == "applied"
                      or bool((st.get("createResponse") or {}).get("response")),
     }
+
+
+def habr_fetch_details(page: Page, vid: int) -> dict[str, Any] | None:
+    page.goto(f"{HABR}/vacancies/{vid}", wait_until="domcontentloaded")
+    check_captcha(page)
+    return parse_habr_vacancy(page_state(page) or {})
 
 
 SOURCES = {
