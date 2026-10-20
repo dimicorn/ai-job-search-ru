@@ -73,8 +73,9 @@ def _set(text: str, key: str, value: Any) -> str:
     pat = re.compile(rf"^  {re.escape(key)}:[^\n#]*?(\s+#[^\n]*)?$", re.M)
     if pat.search(sec):
         sec = pat.sub(lambda m: (line.ljust(36) + " " + m.group(1).lstrip()) if m.group(1) else line, sec, count=1)
-    else:
-        sec = re.sub(r"^(  model:[^\n]*\n)", lambda m: m.group(1) + line + "\n", sec, count=1, flags=re.M)
+    else:  # после строки model, а если её нет — в конец раздела
+        added = re.sub(r"^(  model:[^\n]*)$", lambda m: m.group(1) + "\n" + line, sec, count=1, flags=re.M)
+        sec = added if added != sec else sec.rstrip("\n") + "\n" + line
     return text[:start] + sec + text[end:]
 
 
