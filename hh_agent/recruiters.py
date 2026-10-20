@@ -409,6 +409,8 @@ def _just_wait(m) -> bool:
 
 
 PENDING_AGE = timedelta(days=3)  # вопрос бота старше этого без ответа уже не поднимаем
+NO_MORE_RECHECK = timedelta(hours=6)  # бот ответил «других вакансий нет» — раньше не спрашиваем снова
+MAX_SWITCHES = 3  # столько раз подряд просим бота сменить вакансию без толку (ни выбора, ни вопроса) — потом конец
 
 
 def _unanswered(msgs: list) -> list:
@@ -436,17 +438,26 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
     t = cfg.telegram
     switch_cmd: str | None = None
     pages: set[tuple] = set()  # страницы списка вакансий, уже просмотренные в этом запуске
-    pending_checked = retried = False
+    pending_checked = retried = forced = False
+    switches = 0  # смен вакансии подряд: сбрасывается, когда агент выбрал вакансию или ответил на вопрос
 
-    def switch() -> bool:
-        """Попросить бота сменить вакансию, если в его списке или в свежих откликах есть вакансии без опроса."""
-        nonlocal switch_cmd
-        if dry_run or not _want_switch(cfg, db, client, bot, entity):
+    def switch(force: bool = False) -> bool:
+        """Попросить бота сменить вакансию, если в его списке или в свежих откликах есть вакансии без опроса.
+        force — без этих признаков (диалог не идёт, бот не поздоровался), но не больше раза за запуск:
+        бот пришлёт список вакансий или ответит, что других нет."""
+        nonlocal switch_cmd, forced, switches
+        if dry_run or switches >= MAX_SWITCHES:
+            return False
+        force, forced = force and not forced, forced or force
+        if not force and not _want_switch(cfg, db, client, bot, entity):
             return False
         switch_cmd = switch_cmd or _switch_command(client, entity)
         if not switch_cmd:
             return False
-        console.print(f"  @{bot}: есть вакансии без опроса — {switch_cmd}")
+        switches += 1
+        console.print(f"  @{bot}: {'вопросов нет — проверяю другие вакансии' if force else 'есть вакансии без опроса'}"
+                      f" — {switch_cmd}" + (f" ({switches}-я подряд без результата, последняя)"
+                                            if switches == MAX_SWITCHES else ""))
         db.save_tg_dialog(bot, switched_at=datetime.now().isoformat(timespec="seconds"))
         client.send_message(entity, switch_cmd)
         _wait_bot(client, entity, t.wait_reply_seconds)
@@ -465,7 +476,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
             # Бот молчит после нашего сообщения: опрос мог закончиться без его ответа — идём дальше.
             # Команду «сменить вакансию» второй раз подряд не шлём.
             if (not (last.message or "").startswith("/") and not (state and state["status"] == "human")
-                    and switch()):
+                    and switch(force=True)):
                 continue
             return "active" if fresh else "stale"
 
@@ -509,6 +520,8 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 last.click(i)
             except Exception as e:  # бот не ответил на callback — сообщение он мог всё равно изменить
                 console.print(f"    [dim]кнопка: {e}[/]")
+            if title:
+                switches = 0  # смена вакансии сработала — бот дал выбрать новую
             _wait_bot(client, entity, t.wait_reply_seconds)
             continue
 
@@ -517,13 +530,19 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 _say(bot, last, "done: других вакансий для опроса нет — заканчиваю")
                 if not dry_run:
                     db.save_tg_dialog(bot, status="done", last_seen_id=last.id)
+                return "done"
+            if switch(force=datetime.now(UTC) - last.date > NO_MORE_RECHECK):  # или новый отклик
+                continue
             return "done"
 
         if hanging is None and _handled(state, last):
             if state["status"] == "human" and not retried:
                 retried = True  # факты могли пополниться — пробуем ответить ещё раз
             else:
-                if state["status"] in ("done", None) and switch():
+                # Диалог не идёт: опрос закончен, бот не поздоровался или давно молчит — /change_vacancy.
+                idle = state["status"] in ("done", None) or (
+                    state["status"] == "active" and datetime.now(UTC) - last.date > STALE)
+                if idle and switch(force=True):
                     continue
                 return state["status"] or "done"
 
@@ -615,6 +634,7 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 console.print(f"    [dim]кнопка: {e}[/]")
         else:
             client.send_message(entity, step.text, reply_to=hanging.id if hanging is not None else None)
+        switches = 0  # идёт опрос — смены вакансии до этого были не впустую
         if step.final:  # опрос закончен — дальше следующая вакансия (_want_switch → «сменить вакансию»)
             if survey:
                 db.save_tg_survey(bot, _norm(survey), "done", vid)
