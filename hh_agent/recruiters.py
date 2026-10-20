@@ -359,15 +359,30 @@ def _switch_command(client, entity) -> str | None:
     return None
 
 
+# Бот сам говорит, что вакансий для опроса больше нет: «Сейчас у вас нет других вакансий, по которым
+# можно пройти первичное интервью».
+_NO_MORE = re.compile(r"нет\s+(?:других\s+|больше\s+|новых\s+)?ваканси|больше\s+нет\s+ваканси", re.I)
+
+
+def _no_more(m) -> bool:
+    return not m.out and bool(_NO_MORE.search(m.message or "")) and "?" not in (m.message or "")
+
+
 def _want_switch(cfg: Config, db: DB, client, bot: str, entity) -> bool:
     """Сменить вакансию, если в последнем списке бота есть вакансия без опроса (в том числе отклики,
-    сделанные не агентом) или есть недавний отклик без опроса, сделанный после прошлой смены."""
+    сделанные не агентом) или есть недавний отклик без опроса, сделанный после прошлой смены.
+    После ответа бота «других вакансий нет» — только новый список от бота или новый отклик."""
     surveys = db.tg_surveys(bot)
-    lists = [o for o in map(_choice, reversed(_messages(client, entity, 100))) if o]
-    if lists and any(_norm(title) not in surveys for _, title in lists[0]):
+    msgs = list(reversed(_messages(client, entity, 100)))
+    no_more = next((m for m in msgs if _no_more(m)), None)
+    lists = [(m, o) for m in msgs if (o := _choice(m))]
+    if (lists and (no_more is None or lists[0][0].id > no_more.id)
+            and any(_norm(title) not in surveys for _, title in lists[0][1])):
         return True
     state = db.tg_dialog(bot)
     since = (state["switched_at"] if state else None) or ""
+    if no_more is not None:
+        since = max(since, no_more.date.astimezone().replace(tzinfo=None).isoformat(timespec="seconds"))
     return any(_norm(r["title"]) not in surveys and (r["applied_at"] or "") > since for r in _company_applies(cfg, db))
 
 
@@ -496,6 +511,13 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 console.print(f"    [dim]кнопка: {e}[/]")
             _wait_bot(client, entity, t.wait_reply_seconds)
             continue
+
+        if hanging is None and opts is None and _no_more(last):  # без LLM: опрашивать больше не по чему
+            if not _handled(state, last):
+                _say(bot, last, "done: других вакансий для опроса нет — заканчиваю")
+                if not dry_run:
+                    db.save_tg_dialog(bot, status="done", last_seen_id=last.id)
+            return "done"
 
         if hanging is None and _handled(state, last):
             if state["status"] == "human" and not retried:
