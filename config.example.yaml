@@ -52,17 +52,23 @@ filters:
 
 # ── Аналитик (LLM) ────────────────────────────────────────────────────
 analyst:
-  backend: codex                     # оценка вакансий: codex — Codex CLI (подписка ChatGPT);
-                                     # claude_code — `claude -p` (подписка claude.ai);
-                                     # api — Claude API по ключу ANTHROPIC_API_KEY, оплата по токенам
-  model: claude-opus-5-5             # модель для claude_code / api
+  backend: codex                     # LLM для оценки, писем и ответов (сменить: uv run hh-agent setup):
+                                     # codex — Codex CLI (подписка ChatGPT); claude_code — `claude -p` (подписка claude.ai);
+                                     # api — Claude API по ключу ANTHROPIC_API_KEY;
+                                     # openai — любой OpenAI-совместимый API (OpenAI, OpenRouter, DeepSeek, Gemini,
+                                     #   Mistral, Groq, локальные Ollama и LM Studio); command — своя программа
+  model: claude-opus-5-5             # модель для claude_code / api / openai
+  base_url: null                     # openai: адрес API, например https://openrouter.ai/api/v1 или http://localhost:11434/v1
+  api_key_env: OPENAI_API_KEY        # openai: переменная с ключом (или строка ИМЯ=ключ в .env); null — без ключа
+  openai_extra: {}                   # openai: доп. поля запроса, например {"temperature": 0.3}
+  command: null                      # command: программа, которая читает запрос из stdin и печатает JSON
   effort: medium                     # low | medium | high
-  letter_backend: codex              # codex — письма пишет Codex отдельным запросом, только для проходных;
-                                     # same — письмо в том же запросе, что и оценка
+  letter_backend: codex              # same — письмо в том же запросе, что и оценка; имя бэкенда — отдельным
+                                     # запросом к нему и только для проходных вакансий
   codex_model: null                  # null — модель Codex по умолчанию; gpt-6-astra — самая сильная
   codex_effort: high                 # рассуждение Codex: low | medium | high | xhigh | max; null — по умолчанию модели
   batch_size: 8                      # вакансий на один вызов оценки (меньше токенов на вакансию)
-  parallel: 3                        # одновременных запросов к Codex при оценке и письмах
+  parallel: 3                        # одновременных запросов к LLM при оценке и письмах
   letter_batch_size: 4               # писем на один вызов
   min_score: 70                      # в review попадают вакансии с баллом не ниже
   resume_file: resume.md

@@ -13,3 +13,4 @@ learned.json
 .telegram*
 *.db-*
 faq.yaml
+.env

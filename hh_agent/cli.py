@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime
+from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
@@ -289,6 +290,7 @@ def main() -> None:
     p.add_argument("-c", "--config", default="config.yaml")
     sub = p.add_subparsers(dest="cmd")
     sub.add_parser("help", help="показать этот список команд")
+    sub.add_parser("setup", help="настройка: создать config.yaml и выбрать LLM (Codex, Claude, OpenAI-совместимый API, локальная)")
     sub.add_parser("login", help="войти в hh.ru, Хабр Карьеру и Telegram (один раз, сессия сохраняется)")
     s = sub.add_parser("scan", help="найти вакансии по фильтрам и оценить их")
     s.add_argument("--no-analyze", action="store_true")
@@ -318,6 +320,15 @@ def main() -> None:
         cmd_help(sub)
         return
 
+    config_path = Path(a.config).expanduser().resolve()
+    if a.cmd == "setup" or not config_path.exists():
+        if not sys.stdin.isatty():
+            raise SystemExit(f"Не найден {config_path.name}: запустите в терминале uv run hh-agent setup.")
+        if a.cmd != "setup":
+            console.print(f"[bold]{config_path.name} не найден — первый запуск, настроим агента.[/]")
+        from .wizard import setup
+        setup(config_path)
+        return
     if a.cmd in ("login", "review", "run") and not sys.stdin.isatty():
         raise SystemExit(
             f"Команда {a.cmd} интерактивная: запустите её в обычном окне терминала "

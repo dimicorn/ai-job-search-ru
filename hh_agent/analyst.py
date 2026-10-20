@@ -1,12 +1,9 @@
 """Агент-аналитик: оценивает соответствие вакансии резюме и пишет сопроводительное письмо.
 
-Оценка (analyst.backend):
-  codex       — `codex exec` по подписке ChatGPT (по умолчанию);
-  claude_code — вызывает установленный `claude -p` и тратит лимиты вашей подписки claude.ai;
-  api         — Claude API по ключу ANTHROPIC_API_KEY (оплата по токенам).
+Оценка (analyst.backend) — любой бэкенд из llm.py: codex (по умолчанию), claude_code, api, openai, command.
 Письмо (analyst.letter_backend):
-  codex — `codex exec` по подписке ChatGPT, только для вакансий с баллом ≥ min_score;
-  same  — письмо пишется тем же бэкендом в том же запросе, что и оценка.
+  same — письмо пишется в том же запросе, что и оценка;
+  имя бэкенда (codex, openai, …) — отдельным запросом к нему, только для вакансий с баллом ≥ min_score.
 """
 from __future__ import annotations
 
@@ -20,7 +17,7 @@ from rich.console import Console
 from .config import Config
 from .db import DB, dec_list
 from .events import log_event
-from .llm import LimitReached, ask_json, run_codex
+from .llm import BACKENDS, LimitReached, ask_json
 
 console = Console()
 
@@ -125,8 +122,8 @@ SYSTEM = """Ты помогаешь соискателю отбирать вак
 {preferences}
 {letter_style}"""
 
-CODEX_PROMPT = """Напиши сопроводительное письмо для отклика на вакансию (hh.ru или Хабр Карьера).
-Не запускай команды и не читай файлы — нужен только текст письма в поле cover_letter.
+LETTER_PROMPT = """Напиши сопроводительное письмо для отклика на вакансию (hh.ru или Хабр Карьера).
+Нужен только текст письма в поле cover_letter.
 
 Требования к письму:
 {rules}
@@ -170,8 +167,9 @@ class Analyst:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         a = cfg.analyst
-        if a.letter_backend not in ("codex", "same"):
-            raise SystemExit(f"analyst.letter_backend: неизвестное значение {a.letter_backend!r} (codex | same)")
+        if a.letter_backend not in ("same", *BACKENDS):
+            raise SystemExit(f"analyst.letter_backend: неизвестное значение {a.letter_backend!r} "
+                             f"(same | {' | '.join(BACKENDS)})")
         self.letters_here = a.letter_backend == "same"
         self.resume = cfg.resume_text().strip()
         self.style = a.letter_style.strip() or "деловой, живой, конкретный"
@@ -184,35 +182,36 @@ class Analyst:
         self.out_model = Assessment if self.letters_here else Score
 
     def assess(self, row) -> Assessment:
-        """Оценка; письмо — в том же запросе (same) или отдельно от Codex, если балл проходной."""
+        """Оценка; письмо — в том же запросе (same) или отдельным запросом, если балл проходной."""
         out = ask_json(self.cfg, self.system, _vacancy_prompt(row), self.out_model, purpose="score")
         out.score = max(0, min(100, out.score))
         if isinstance(out, Assessment):
             return out
         letter = ""
         if out.score >= self.cfg.analyst.min_score:
-            letter = self._codex_letter(row, out.reasons)
+            letter = self._letter(row, out.reasons)
         return Assessment(**out.model_dump(), cover_letter=letter)
 
     def letter(self, row, extra: str | None = None) -> str:
         """Новое письмо для уже оценённой вакансии (для review и `hh-agent letters`)."""
         if not self.letters_here:
-            return self._codex_letter(row, dec_list(row["reasons"]), extra)
+            return self._letter(row, dec_list(row["reasons"]), extra)
         content = _vacancy_prompt(row)
         if extra:
             content += f"\n\nДополнительные указания кандидата к письму: {extra}"
         return ask_json(self.cfg, self.system, content, Assessment, purpose="letter").cover_letter
 
-    def _codex_letter(self, row, reasons: list[str], extra: str | None = None) -> str:
-        prompt = CODEX_PROMPT.format(
+    def _letter(self, row, reasons: list[str], extra: str | None = None) -> str:
+        """Письмо отдельным запросом к analyst.letter_backend."""
+        prompt = LETTER_PROMPT.format(
             rules=LETTER_RULES, style=self.style, resume=self.resume, vacancy=_vacancy_prompt(row),
             reasons="\n".join(f"- {r}" for r in reasons) or "—",
             extra=f"\nДополнительные указания кандидата к письму: {extra}\n" if extra else "",
         )
-        return run_codex(prompt, Letter, self.cfg.analyst.codex_model, self.cfg, "letter").cover_letter.strip()
+        return ask_json(self.cfg, "", prompt, Letter, "letter", backend=self.cfg.analyst.letter_backend).cover_letter.strip()
 
     def assess_batch(self, rows) -> dict[int, Assessment]:
-        """Оценить пачку вакансий одним вызовом. Письма (letter_backend: codex) — отдельно, letters_batch."""
+        """Оценить пачку вакансий одним вызовом. Письма (letter_backend не same) — отдельно, letters_batch."""
         batch_model = AssessmentBatch if self.letters_here else ScoreBatch
         user = BATCH_NOTE + "\n\n" + "\n\n".join(
             f'<vacancy id="{r["id"]}">\n{_vacancy_prompt(r)}\n</vacancy>' for r in rows)
@@ -227,17 +226,17 @@ class Analyst:
         return res
 
     def letters_batch(self, rows, reasons: dict[int, list[str]]) -> dict[int, str]:
-        """Письма для пачки вакансий одним вызовом Codex."""
+        """Письма для пачки вакансий одним запросом к analyst.letter_backend."""
         vac = "\n\n".join(
             f'<vacancy id="{r["id"]}">\n{_vacancy_prompt(r)}\n\n'
             f'Чем кандидат подходит и где пробелы (по оценке аналитика):\n'
             + ("\n".join(f"- {x}" for x in reasons.get(r["id"], [])) or "—") + "\n</vacancy>"
             for r in rows)
-        prompt = CODEX_PROMPT.split("<resume>")[0].replace(
+        prompt = LETTER_PROMPT.split("<resume>")[0].replace(
             "Напиши сопроводительное письмо для отклика на вакансию (hh.ru или Хабр Карьера).", LETTERS_NOTE
-        ).replace("нужен только текст письма в поле cover_letter", "нужны только письма в items").format(
+        ).replace("Нужен только текст письма в поле cover_letter", "Нужны только письма в items").format(
             rules=LETTER_RULES, style=self.style) + f"<resume>\n{self.resume}\n</resume>\n\n{vac}"
-        out = run_codex(prompt, LetterBatch, self.cfg.analyst.codex_model, self.cfg, "letter")
+        out = ask_json(self.cfg, "", prompt, LetterBatch, "letter", backend=self.cfg.analyst.letter_backend)
         ids = {r["id"] for r in rows}
         return {it.vacancy_id: it.cover_letter.strip() for it in out.items if it.vacancy_id in ids}
 
@@ -263,7 +262,7 @@ def _in_parallel(cfg: Config, fn, chunks):
 
 
 def _write_letters(cfg: Config, db: DB, analyst: Analyst, rows) -> int:
-    """Письма для подходящих вакансий пачками (letter_backend: codex). Неудачи — письмо напишут при отклике."""
+    """Письма для подходящих вакансий пачками (letter_backend не same). Неудачи — письмо напишут при отклике."""
     done = 0
     batches = _in_parallel(cfg, lambda c: analyst.letters_batch(c, {r["id"]: dec_list(r["reasons"]) for r in c}),
                            _chunks(rows, cfg.analyst.letter_batch_size))

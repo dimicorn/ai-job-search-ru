@@ -37,9 +37,13 @@ class Filters(BaseModel):
 
 class Analyst(BaseModel):
     backend: str = "codex"  # codex | claude_code (подписка через `claude -p`) | api (ключ)
-    model: str = "claude-opus-5-5"
+    model: str = "claude-opus-5-5"  # модель для claude_code / api / openai
     effort: str = "medium"
-    letter_backend: str = "codex"  # codex — письма пишет `codex exec`; same — та же модель Claude
+    base_url: str | None = None   # openai: адрес API, например https://api.openai.com/v1 или http://localhost:11434/v1
+    api_key_env: str | None = "OPENAI_API_KEY"  # openai: переменная (или строка в .env) с ключом; null — без ключа
+    openai_extra: dict[str, Any] = Field(default_factory=dict)  # openai: доп. поля запроса (temperature, reasoning_effort…)
+    command: str | None = None    # command: программа, которая читает запрос из stdin и печатает JSON
+    letter_backend: str = "codex"  # same — письмо в запросе оценки; иначе бэкенд для отдельного запроса письма
     codex_model: str | None = None  # None — модель Codex по умолчанию (~/.codex/config.toml не читается)
     codex_effort: str | None = None  # глубина рассуждения Codex: low | medium | high | xhigh | max; None — по умолчанию модели
     batch_size: int = 8          # вакансий на один вызов оценки

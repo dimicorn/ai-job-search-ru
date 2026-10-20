@@ -1,12 +1,22 @@
-"""Вызовы LLM с ответом по JSON-схеме: Codex CLI, Claude Code CLI или Claude API.
+"""Вызовы LLM с ответом по JSON-схеме. Бэкенды (analyst.backend):
+  codex       — Codex CLI (подписка ChatGPT);
+  claude_code — Claude Code CLI `claude -p` (подписка claude.ai);
+  api         — Claude API по ключу ANTHROPIC_API_KEY;
+  openai      — любой OpenAI-совместимый API: OpenAI, OpenRouter, DeepSeek, Gemini, Mistral, Groq,
+                локальные Ollama, LM Studio, vLLM (analyst.base_url, analyst.model, ключ — analyst.api_key_env);
+  command     — любая программа: запрос в stdin, ответ (JSON) в stdout (analyst.command).
 
 Каждый вызов пишет в журнал событие `llm` с расходом токенов (для `hh-agent stats`)."""
 from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -52,16 +62,127 @@ def _schema(model: type[BaseModel]) -> dict:
     return strict(model.model_json_schema())
 
 
-def ask_json(cfg: Config, system: str, user: str, model: type[T], purpose: str = "other") -> T:
-    """Один запрос к бэкенду из analyst.backend. purpose — для учёта токенов в stats."""
-    b = cfg.analyst.backend
+BACKENDS = ("codex", "claude_code", "api", "openai", "command")
+
+
+def ask_json(cfg: Config, system: str, user: str, model: type[T], purpose: str = "other",
+             backend: str | None = None) -> T:
+    """Один запрос к LLM. backend — другой бэкенд вместо analyst.backend (письма: analyst.letter_backend).
+    purpose — для учёта токенов в stats."""
+    b = backend or cfg.analyst.backend
     if b == "codex":
         return run_codex(f"{system}\n{NO_TOOLS}\n\n{user}", model, cfg.analyst.codex_model, cfg, purpose)
     if b == "claude_code":
         return run_claude_cli(system, user, model, cfg, purpose)
     if b == "api":
         return run_api(system, user, model, cfg, purpose)
-    raise SystemExit(f"analyst.backend: неизвестное значение {b!r} (codex | claude_code | api)")
+    if b == "openai":
+        return run_openai(system, user, model, cfg, purpose)
+    if b == "command":
+        return run_command(system, user, model, cfg, purpose)
+    raise SystemExit(f"analyst.backend: неизвестное значение {b!r} ({' | '.join(BACKENDS)})")
+
+
+def _json_note(model: type[BaseModel]) -> str:
+    return ("Ответь только JSON-объектом по этой JSON-схеме, без пояснений и без markdown:\n"
+            + json.dumps(_schema(model), ensure_ascii=False))
+
+
+def _parse(text: str, model: type[T]) -> T:
+    """JSON из ответа модели: без обёртки ```json и текста вокруг объекта."""
+    text = re.sub(r"^\s*```(?:json)?|```\s*$", "", (text or "").strip())
+    start, end = text.find("{"), text.rfind("}")
+    try:
+        return model.model_validate_json(text[start:end + 1] if start >= 0 else text)
+    except ValueError as e:
+        raise RuntimeError(f"ответ модели не по схеме: {str(e)[:200]} — начало ответа: {text[:200]!r}")
+
+
+def api_key(cfg: Config) -> str:
+    """Ключ для openai: из переменной окружения, иначе из файла .env рядом с config.yaml
+    (launchd не видит переменных из ~/.zshrc)."""
+    name = cfg.analyst.api_key_env
+    if not name:
+        return ""
+    if os.environ.get(name):
+        return os.environ[name]
+    env = cfg.path(".env")
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            k, _, v = line.partition("=")
+            if k.strip() == name:
+                return v.strip().strip('"').strip("'")
+    return ""
+
+
+_FORMAT: dict[str, int] = {}  # base_url → какой response_format сервер принял (индекс в списке ниже)
+
+
+def run_openai(system: str, user: str, model: type[T], cfg: Config, purpose: str = "other") -> T:
+    """OpenAI-совместимый /chat/completions. Строгая JSON-схема, если сервер её поддерживает,
+    иначе json_object, иначе просто схема в промпте."""
+    a = cfg.analyst
+    if not a.base_url or not a.model:
+        raise SystemExit("analyst.backend: openai — задайте analyst.base_url и analyst.model (или uv run hh-agent setup).")
+    url = a.base_url.rstrip("/") + "/chat/completions"
+    key = api_key(cfg)
+    if a.api_key_env and not key:
+        raise SystemExit(f"Нет ключа: задайте переменную {a.api_key_env} или строку {a.api_key_env}=… в файле .env.")
+    messages = [{"role": "system", "content": f"{system}\n\n{_json_note(model)}".strip()},
+                {"role": "user", "content": user}]
+    formats = [{"type": "json_schema", "json_schema": {"name": model.__name__, "schema": _schema(model), "strict": True}},
+               {"type": "json_object"}, None]
+    headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
+    for i in range(_FORMAT.get(url, 0), len(formats)):
+        body = {"model": a.model, "messages": messages, **a.openai_extra}
+        if formats[i]:
+            body["response_format"] = formats[i]
+        req = urllib.request.Request(url, json.dumps(body).encode(), headers)
+        try:
+            with urllib.request.urlopen(req, timeout=900) as r:
+                data = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode(errors="replace")[:300]
+            if e.code in (401, 403):
+                raise SystemExit(f"{a.base_url}: ключ не подошёл ({e.code}): {msg}")
+            if e.code == 429:
+                raise LimitReached(f"{a.base_url}: {msg}")
+            if e.code in (400, 422) and formats[i] is not None:
+                continue  # сервер не знает такой response_format — пробуем проще
+            raise RuntimeError(f"{a.base_url}: {e.code} {msg}")
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise RuntimeError(f"{a.base_url}: нет ответа ({e})")
+        _FORMAT[url] = i
+        u = data.get("usage") or {}
+        cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+        _usage(cfg, purpose, "openai", u.get("prompt_tokens", 0), cached, u.get("completion_tokens", 0))
+        try:
+            text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise RuntimeError(f"{a.base_url}: неожиданный ответ {str(data)[:300]}")
+        return _parse(text, model)
+    raise RuntimeError(f"{a.base_url}: сервер не принял запрос ни в одном формате")
+
+
+def run_command(system: str, user: str, model: type[T], cfg: Config, purpose: str = "other") -> T:
+    """analyst.command: запрос — в stdin, JSON-ответ — из stdout (например, `ollama run qwen3`)."""
+    cmd = cfg.analyst.command
+    if not cmd:
+        raise SystemExit("analyst.backend: command — задайте analyst.command (или uv run hh-agent setup).")
+    prompt = f"{system}\n\n{user}\n\n{_json_note(model)}".strip()
+    try:
+        r = subprocess.run(shlex.split(cmd), input=prompt, capture_output=True, text=True, timeout=900)
+    except FileNotFoundError:
+        raise SystemExit(f"analyst.command: не найдена программа {shlex.split(cmd)[0]!r}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"{cmd}: нет ответа за 15 минут")
+    _usage(cfg, purpose, "command")
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout).strip()[-300:]
+        if "limit" in msg.lower() or "quota" in msg.lower():
+            raise LimitReached(f"{cmd}: {msg}")
+        raise RuntimeError(f"{cmd}: код выхода {r.returncode}: {msg}")
+    return _parse(r.stdout, model)
 
 
 def run_codex(prompt: str, model: type[T], codex_model: str | None = None,
