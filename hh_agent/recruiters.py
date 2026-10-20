@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import random
 import re
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -36,7 +37,20 @@ from .events import log_event
 from .llm import LimitReached, ask_json
 from .questions import ANSWER_STYLE
 
-console = Console()
+
+class _Console(Console):
+    """В autopilot опросы идут в своём потоке: строки — со временем и именем потока, как у остальных."""
+
+    def print(self, *objects, **kwargs) -> None:
+        name = threading.current_thread().name
+        if name != "MainThread" and objects and isinstance(objects[0], str):
+            tag = (f"{datetime.now():%H:%M:%S} {name} " if kwargs.get("markup") is False
+                   else f"[dim]{datetime.now():%H:%M:%S}[/] [bold]{name}[/] ")
+            objects = (tag + objects[0], *objects[1:])
+        super().print(*objects, **kwargs)
+
+
+console = _Console()
 
 # Только боты (username кончается на bot): каналы вроде t.me/sbercareers не трогаем.
 LINK_RE = re.compile(r"(?:t\.me|telegram\.me)/([A-Za-z0-9_]{2,}bot)\b(?:/?\?start=([\w-]+))?"
@@ -429,6 +443,11 @@ def _human_pause(t, question: str, answer: str, spent: float) -> float:
     return max(0.0, min(secs, t.max_reply_seconds) - spent)
 
 
+def _ago(d: timedelta) -> str:
+    m = max(0, int(d.total_seconds() // 60))
+    return f"{m // 60} ч {m % 60} мин" if m >= 60 else f"{m} мин"
+
+
 def _say(bot: str, m, what: str) -> None:
     console.print(f"  @{bot}: {' '.join((m.message or '').split())[:160]}\n    → {what}", markup=False)
 
@@ -508,6 +527,8 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                     _say(bot, last, "по всем вакансиям из списка опрос уже был")
                     if not dry_run:
                         db.save_tg_dialog(bot, status="done", last_seen_id=last.id)
+                else:
+                    console.print(f"  @{bot}: в последнем списке бота все вакансии уже пройдены")
                 return "done"
             log_event(cfg, "recruiter", bot=bot, action="choose", vacancy=title, dry_run=dry_run)
             if dry_run:
@@ -533,6 +554,9 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                 return "done"
             if switch(force=datetime.now(UTC) - last.date > NO_MORE_RECHECK):  # или новый отклик
                 continue
+            ago = datetime.now(UTC) - last.date
+            console.print(f"  @{bot}: бот уже ответил, что других вакансий нет ({_ago(ago)} назад); "
+                          f"переспрошу не раньше чем через {_ago(NO_MORE_RECHECK - ago)}, или после нового отклика")
             return "done"
 
         if hanging is None and _handled(state, last):
@@ -544,6 +568,8 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                     state["status"] == "active" and datetime.now(UTC) - last.date > STALE)
                 if idle and switch(force=True):
                     continue
+                if state["status"] != "human":
+                    console.print(f"  @{bot}: новых сообщений от бота нет")
                 return state["status"] or "done"
 
         if hanging is None and _just_wait(last):
@@ -696,5 +722,6 @@ def run(cfg: Config, db: DB, dry_run: bool = False, cdp_port: int | None = None)
             if param and not dry_run:
                 db.tg_links_started(bot)  # переписка есть — ссылка больше не нужна
             console.print(f"  @{bot}: {_STATUS.get(status, status)}")
+            log_event(cfg, "recruiter_check", bot=bot, status=status, dry_run=dry_run)  # и когда делать было нечего
     finally:
         client.disconnect()
