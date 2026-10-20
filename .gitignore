@@ -14,3 +14,4 @@ learned.json
 *.db-*
 faq.yaml
 .env
+.llm-limits.json

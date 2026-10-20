@@ -63,6 +63,8 @@ analyst:
   openai_extra: {}                   # openai: доп. поля запроса, например {"temperature": 0.3}
   command: null                      # command: программа, которая читает запрос из stdin и печатает JSON
   effort: medium                     # low | medium | high
+  fallback_backend: null             # кончились лимиты (например, у Codex) — запросы идут сюда:
+                                     # claude_code, api, openai, command; null — остановиться
   letter_backend: codex              # same — письмо в том же запросе, что и оценка; имя бэкенда — отдельным
                                      # запросом к нему и только для проходных вакансий
   codex_model: null                  # null — модель Codex по умолчанию; gpt-6-astra — самая сильная

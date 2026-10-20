@@ -6,17 +6,25 @@
                 локальные Ollama, LM Studio, vLLM (analyst.base_url, analyst.model, ключ — analyst.api_key_env);
   command     — любая программа: запрос в stdin, ответ (JSON) в stdout (analyst.command).
 
+Кончились лимиты (LimitReached) — запрос уходит в analyst.fallback_backend, и все запросы к этому
+бэкенду идут сразу туда до времени сброса из текста ошибки («try again at 4:37 PM»; хранится в
+.llm-limits.json и действует и в следующих запусках), а если времени нет — до конца запуска.
+
 Каждый вызов пишет в журнал событие `llm` с расходом токенов (для `hh-agent stats`)."""
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shlex
 import subprocess
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -64,12 +72,81 @@ def _schema(model: type[BaseModel]) -> dict:
 
 BACKENDS = ("codex", "claude_code", "api", "openai", "command")
 
+LIMITS_FILE = ".llm-limits.json"  # бэкенд → до какого времени (epoch) у него нет лимитов
+_limited: dict[str, float] | None = None  # то же в памяти; inf — время сброса неизвестно, до конца запуска
+_limited_lock = threading.Lock()  # запросы идут из нескольких потоков
+
+
+def _limits(cfg: Config) -> dict[str, float]:
+    global _limited
+    if _limited is None:
+        try:
+            _limited = {k: float(v) for k, v in json.loads(cfg.path(LIMITS_FILE).read_text()).items()}
+        except (OSError, ValueError, AttributeError):
+            _limited = {}
+    return _limited
+
+
+def reset_at(message: str, now: datetime | None = None) -> datetime | None:
+    """Когда сбросится лимит, по тексту ошибки: «try again at 4:37 PM» (Codex), «… at Oct 21st, 2026 9:05 AM»,
+    «try again in 2 hours 15 minutes». Время без даты — сегодня или, если уже прошло, завтра."""
+    now = now or datetime.now()
+    m = re.search(r"try again in ((?:\d+\s*(?:days?|d|hours?|h|minutes?|mins?|m)\b[\s,and]*)+)", message, re.I)
+    if m:
+        units = {"d": 86400, "h": 3600, "m": 60}
+        secs = sum(int(n) * units[u[0].lower()] for n, u in re.findall(r"(\d+)\s*([a-z]+)", m.group(1), re.I))
+        return now + timedelta(seconds=secs) if secs else None
+    m = re.search(r"try again at ([^\"\n]+?)\.?(?:\"|\n|$)", message, re.I)
+    if not m:
+        return None
+    text = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", m.group(1).strip().rstrip("."))
+    for fmt in ("%I:%M %p", "%I %p", "%H:%M", "%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p", "%b %d %I:%M %p"):
+        try:
+            t = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if "%Y" in fmt:
+            return t
+        if "%b" in fmt:
+            t = t.replace(year=now.year)
+            return t if t > now else t.replace(year=now.year + 1)
+        t = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+        return t if t > now else t + timedelta(days=1)
+    return None
+
 
 def ask_json(cfg: Config, system: str, user: str, model: type[T], purpose: str = "other",
              backend: str | None = None) -> T:
     """Один запрос к LLM. backend — другой бэкенд вместо analyst.backend (письма: analyst.letter_backend).
     purpose — для учёта токенов в stats."""
     b = backend or cfg.analyst.backend
+    fb = cfg.analyst.fallback_backend
+    if not fb or fb == b:
+        return _ask(cfg, b, system, user, model, purpose)
+    if _limits(cfg).get(b, 0) > time.time():
+        return _ask(cfg, fb, system, user, model, purpose)
+    try:
+        return _ask(cfg, b, system, user, model, purpose)
+    except LimitReached as e:
+        until = reset_at(str(e))
+        with _limited_lock:
+            limits = _limits(cfg)
+            first = limits.get(b, 0) <= time.time()
+            limits[b] = until.timestamp() if until else math.inf
+            try:  # время сброса переживает запуск: следующий тоже сразу пойдёт в запасной бэкенд
+                cfg.path(LIMITS_FILE).write_text(json.dumps({k: v for k, v in limits.items() if v != math.inf}))
+            except OSError:
+                pass
+        if first:
+            from .events import log_event
+            when = f"до {until:%d.%m %H:%M}" if until else "до конца запуска"
+            print(f"{b}: кончились лимиты — {when} работаю через {fb}", flush=True)
+            log_event(cfg, "llm_fallback", backend=b, fallback=fb, until=f"{until:%Y-%m-%dT%H:%M}" if until else None,
+                      reason=str(e)[:300])
+        return _ask(cfg, fb, system, user, model, purpose)
+
+
+def _ask(cfg: Config, b: str, system: str, user: str, model: type[T], purpose: str) -> T:
     if b == "codex":
         return run_codex(f"{system}\n{NO_TOOLS}\n\n{user}", model, cfg.analyst.codex_model, cfg, purpose)
     if b == "claude_code":
@@ -222,11 +299,13 @@ def run_codex(prompt: str, model: type[T], codex_model: str | None = None,
                 return model.model_validate_json(f.read())
         except (OSError, ValueError):
             msg = (r.stderr or r.stdout).strip()[-300:]
-            low = msg.lower()
+            # Ошибки с --json приходят событиями в stdout, а в stderr бывают посторонние предупреждения.
+            low = f"{r.stderr}\n{r.stdout}".lower()
             if "login" in low or "unauthorized" in low:
                 raise SystemExit("Codex не авторизован: выполните `codex login`.")
-            if "limit" in low or "usage" in low:
-                raise LimitReached(f"codex: {msg}")
+            if re.search(r"usage limit|rate.?limit|quota|limit reached|hit your|too many requests", low):
+                err = re.findall(r'"message"\s*:\s*"([^"]*limit[^"]*)"', r.stdout, re.I)
+                raise LimitReached(f"codex: {err[-1] if err else msg}")
             raise RuntimeError(f"codex exec: {msg or f'код выхода {r.returncode}'}")
 
 
