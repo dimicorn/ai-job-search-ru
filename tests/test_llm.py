@@ -127,3 +127,19 @@ def test_codex_usage_field_is_not_a_limit(cfg, monkeypatch):
     with pytest.raises(RuntimeError) as e:
         llm.run_codex("prompt", Ping, cfg=cfg)
     assert not isinstance(e.value, llm.LimitReached)
+
+
+def test_codex_words_from_vacancy_are_not_errors(cfg, monkeypatch):
+    # «login» и «rate limit» в пересказе вакансии — не «нет входа» и не исчерпанный лимит
+    events = [{"type": "item.completed", "item": {"type": "agent_message", "text": "SSO login, rate limiting в API"}},
+              {"type": "turn.failed", "error": {"message": "stream disconnected before completion"}}]
+    _codex_run(monkeypatch, "\n".join(json.dumps(e) for e in events) + "\n")
+    with pytest.raises(RuntimeError) as e:
+        llm.run_codex("prompt", Ping, cfg=cfg)
+    assert not isinstance(e.value, llm.LimitReached)
+
+
+def test_codex_not_logged_in(cfg, monkeypatch):
+    _codex_run(monkeypatch, "", stderr="Error: Not logged in. Run `codex login`.")
+    with pytest.raises(SystemExit, match="codex login"):
+        llm.run_codex("prompt", Ping, cfg=cfg)

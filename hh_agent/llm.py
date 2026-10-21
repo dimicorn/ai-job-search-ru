@@ -270,6 +270,21 @@ def run_command(system: str, user: str, model: type[T], cfg: Config, purpose: st
     return _parse(r.stdout, model)
 
 
+def _codex_errors(stdout: str, stderr: str) -> str:
+    """Текст ошибок Codex: stderr и события ошибок из --json. Остальные события (рассуждения, ответ модели)
+    пересказывают вакансию — в них бывают «login» и «rate limit», которые к ошибке отношения не имеют."""
+    out = [stderr]
+    for line in stdout.splitlines():
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            out.append(line)
+            continue
+        if isinstance(ev, dict) and re.search(r"error|failed", str(ev.get("type", "")), re.I):
+            out.append(json.dumps(ev, ensure_ascii=False))
+    return "\n".join(out)
+
+
 def run_codex(prompt: str, model: type[T], codex_model: str | None = None,
               cfg: Config | None = None, purpose: str = "other") -> T:
     """Один запуск `codex exec` в пустой папке, без доступа на запись, с ответом по JSON-схеме."""
@@ -309,11 +324,12 @@ def run_codex(prompt: str, model: type[T], codex_model: str | None = None,
         except (OSError, ValueError):
             msg = (r.stderr or r.stdout).strip()[-300:]
             # Ошибки с --json приходят событиями в stdout, а в stderr бывают посторонние предупреждения.
-            low = f"{r.stderr}\n{r.stdout}".lower()
+            errors = _codex_errors(r.stdout, r.stderr)
+            low = errors.lower()
             if "login" in low or "unauthorized" in low:
                 raise SystemExit("Codex не авторизован: выполните `codex login`.")
             if re.search(r"usage limit|rate.?limit|quota|limit reached|hit your|too many requests", low):
-                err = re.findall(r'"message"\s*:\s*"([^"]*limit[^"]*)"', r.stdout, re.I)
+                err = re.findall(r'"message"\s*:\s*"([^"]*limit[^"]*)"', errors, re.I)
                 raise LimitReached(f"codex: {err[-1] if err else msg}")
             raise RuntimeError(f"codex exec: {msg or f'код выхода {r.returncode}'}")
 

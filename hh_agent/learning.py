@@ -64,7 +64,7 @@ def _clamp(key: str, value: float) -> float:
 def learn(cfg: Config, db=None) -> None:
     """Применить правила к событиям текущей сессии."""
     events = [e for e in read_events(cfg) if e.get("session") == SESSION]
-    applies = [e for e in events if e["kind"] == "apply"]
+    applies = [e for e in events if e["kind"] == "apply" and e.get("mode") != "dry_run"]  # пробный прогон не в счёт
     captchas = sum(e["kind"] == "captcha" for e in events)
     errors = sum(e["kind"] == "error" for e in events)
     unconfirmed = sum(e.get("status") == "unconfirmed" for e in applies)

@@ -24,7 +24,7 @@ from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PWTimeout
 from rich.panel import Panel
 
-from . import questions
+from . import questions, stop
 from .browser import HABR, CaptchaError, captcha_visible, check_captcha, page_state, pause, source_of
 from .config import Config
 from .events import SESSION, log_event
@@ -321,6 +321,8 @@ class Applier:
         except CaptchaError:
             raise  # не сбой вёрстки: капчу разбирает вызывающий код
         except Exception as e:
+            if stop.requested():  # браузер закрыт по Ctrl+C — не сбой формы, в журнал и debug/ не пишем
+                raise
             self._debug_dump(vid, f"сбой отклика: {type(e).__name__}")
             log_event(self.cfg, "error", where="apply", vid=vid, mode=mode, message=f"{type(e).__name__}: {e}"[:500])
             raise

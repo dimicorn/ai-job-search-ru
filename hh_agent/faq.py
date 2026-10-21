@@ -50,7 +50,15 @@ def _load(cfg: Config) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or []
-    return [e for e in data if isinstance(e, dict) and e.get("match") and e.get("answer")]
+    out = []
+    for e in data:
+        if not (isinstance(e, dict) and e.get("match") and e.get("answer")):
+            continue
+        for k in ("match", "unless"):  # «match: зарплата» строкой — один фрагмент, а не список букв
+            if isinstance(e.get(k), str):
+                e[k] = [e[k]]
+        out.append(e)
+    return out
 
 
 def lookup(cfg: Config, text: str) -> str | None:

@@ -145,7 +145,7 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
             if db.applied_today() >= cfg.apply.daily_limit:
                 console.print(f"[yellow]Достигнут дневной лимит ({cfg.apply.daily_limit}).[/]")
                 break
-            letter = row["cover_letter"]
+            letter = row["cover_letter"] or ""
             if not letter:  # вакансия ниже порога: письмо ещё не писалось
                 analyst = analyst or analyst_mod.Analyst(cfg)
                 try:
@@ -153,7 +153,8 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
                         letter = analyst.letter(row)
                     db.update(row["id"], cover_letter=letter)
                 except (analyst_mod.LimitReached, RuntimeError) as e:
-                    console.print(f"[red]Не удалось написать письмо: {e}[/]")
+                    console.print(f"[red]Не удалось написать письмо: {e}[/] — напишите его сами ([e]) или "
+                                  "попробуйте ещё раз ([r]).")
             while True:
                 _show(db.get(row["id"]), i, len(rows))
                 ch = input(f"{keys}\n> ").strip().lower()
@@ -185,10 +186,12 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
                                                  analyst_mod._vacancy_prompt(db.get(row["id"])))
                     except Exception as e:  # вёрстка hh меняется — не роняем всю сессию
                         status, note = "error", f"applier: {e}"
-                    # «Отклик уже был» — applied без applied_at: в дневной лимит не идёт.
+                    # «Отклик уже был» — applied без applied_at: в дневной лимит не идёт. Неподтверждённый
+                    # отклик мог уйти — в лимит идёт, как в auto.
                     db.update(
                         row["id"], status="applied" if status == "already_applied" else status, error=note,
-                        applied_at=datetime.now().isoformat(timespec="seconds") if status == "applied" else None,
+                        applied_at=(datetime.now().isoformat(timespec="seconds")
+                                    if status in ("applied", "unconfirmed") else None),
                     )
                     color = {"applied": "green", "already_applied": "dim", "manual": "yellow"}.get(status, "red")
                     console.print(f"[{color}]{status}[/] {note or ''}")

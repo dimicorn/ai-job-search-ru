@@ -37,3 +37,12 @@ def test_learn_skips_unknowns_and_keeps_own_entries(cfg):
 
 def test_question_of_drops_bot_intro():
     assert faq.question_of("Спасибо за ответ! Следующий вопрос. Есть ли опыт с Docker?") == "Есть ли опыт с Docker?"
+
+
+def test_match_written_as_string_is_one_fragment(cfg):
+    # «match: зарплат» строкой раньше разбиралась по буквам — и подходила к любому вопросу
+    cfg.path(cfg.questions.faq_file).write_text("- match: зарплат\n  unless: миним\n  answer: 150 000\n",
+                                                encoding="utf-8")
+    assert faq.lookup(cfg, "Какой у вас опыт с PyTorch?") is None
+    assert faq.lookup(cfg, "Ваши ожидания по зарплате?") == "150 000"
+    assert faq.lookup(cfg, "Минимальная зарплата?") is None

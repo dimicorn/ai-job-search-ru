@@ -55,3 +55,15 @@ def test_thread_error_after_stop_is_not_a_failure(cfg):
     t.start()
     t.join()
     assert t.daemon and not cfg.path("logs/events.jsonl").exists()
+
+
+def test_thread_system_exit_is_reported(cfg, capsys):
+    # SystemExit в потоке Python гасит молча — без этого поток откликов пропадал без следа
+    def no_login(cfg):
+        raise SystemExit("Codex не авторизован: выполните `codex login`.")
+
+    t = autopilot._thread(no_login, cfg, name="hh.ru")
+    t.start()
+    t.join()
+    assert "codex login" in capsys.readouterr().out
+    assert "codex login" in cfg.path("logs/events.jsonl").read_text(encoding="utf-8")

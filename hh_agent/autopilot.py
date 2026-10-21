@@ -26,6 +26,8 @@ from .learning import Store, learn
 from .log import console
 from .scout import scan
 
+POLL_SECONDS = 5  # как часто поток откликов смотрит в базу, пока поиск и оценка ещё идут
+
 
 def _log(msg: str) -> None:
     """Строка со временем: в рабочих потоках время и имя потока добавляет сама консоль (log.py)."""
@@ -34,16 +36,18 @@ def _log(msg: str) -> None:
 
 
 def _thread(target, *args, name: str) -> threading.Thread:
-    """Поток, ошибка которого попадает в журнал, а не обрывает запуск молча. После остановки ошибки
-    не сбой (браузер закрыт по Ctrl+C); второй Ctrl+C завершает процесс, не дожидаясь потока (daemon)."""
+    """Поток, ошибка которого попадает в журнал, а не обрывает запуск молча. SystemExit (нет входа в Codex,
+    неверный ключ API) — тоже: в потоке Python гасит его без следа. После остановки ошибки не сбой
+    (браузер закрыт по Ctrl+C); второй Ctrl+C завершает процесс, не дожидаясь потока (daemon)."""
     def body():
         try:
             target(*args)
-        except Exception as e:
+        except (Exception, SystemExit) as e:
             if stop.requested():
                 return
-            _log(f"[red]Сбой потока: {e!r}[/]")
-            log_event(args[0], "error", where=f"thread {name}", message=repr(e)[:500])
+            msg = str(e) if isinstance(e, SystemExit) else repr(e)
+            _log(f"[red]Сбой потока: {msg}[/]")
+            log_event(args[0], "error", where=f"thread {name}", message=msg[:500])
     return threading.Thread(target=body, name=name, daemon=True)
 
 
@@ -196,7 +200,7 @@ def _apply_worker(cfg: Config, run: Run, src: str, mode: Mode, pace: float, cdp_
             row = run.next_row(db, src)
             if row is None:
                 if run.producing.is_set():
-                    stop.wait(5)  # поиск и оценка ещё идут — новые вакансии появятся
+                    stop.wait(POLL_SECONDS)  # поиск и оценка ещё идут — новые вакансии появятся
                     continue
                 break
             wait = st.next_ready - time.monotonic()

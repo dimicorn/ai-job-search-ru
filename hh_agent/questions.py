@@ -194,7 +194,7 @@ def fill(page: Page, questions: list[dict[str, Any]], answers: QAnswers, letter:
         if q["type"] in ("textarea", "text", "number"):
             type_text(page.locator(sel).first, letter if a.kind == "cover_letter" else a.text)
         elif q["type"] == "select":
-            if a.choices:
+            if a.choices and 0 <= a.choices[0] < len(q["options"]):  # несуществующий вариант Playwright ждёт 30 с
                 page.locator(sel).first.select_option(index=a.choices[0])
         else:  # radio / checkbox: сами input часто скрыты стилями — кликаем через DOM
             for j in a.choices[:1] if q["type"] == "radio" else a.choices:

@@ -129,6 +129,11 @@ def test_extract_employer_questions(page):
     assert page.input_value("[name=task_4]") == "Санкт-Петербург"
     assert page.is_checked("[name=consent]")
 
+    # несуществующий вариант (модель ошиблась номером) — не ждать его 30 с, а оставить как есть
+    answers = questions.QAnswers(answers=[answer(3, choices=[7]), answer(1, choices=[9])])
+    questions.fill(page, qs, answers, letter="", type_text=lambda loc, text: loc.fill(text))
+    assert page.input_value("[name=task_4]") == "Санкт-Петербург"
+
 
 def test_habr_external_link_is_absolute(cfg, monkeypatch):
     """Хабр отдаёт ссылку на отклик на сайте компании относительной — открыть её как есть нельзя."""
