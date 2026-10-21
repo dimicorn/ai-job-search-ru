@@ -360,8 +360,9 @@ class Applier:
             if "vacancy_response" in page.url:
                 return self._questionnaire(vid, letter, vacancy)
 
-        if self.cfg.apply.resume_title:
-            opt = page.get_by_text(self.cfg.apply.resume_title, exact=False).first
+        if self.cfg.apply.resume_title:  # только в окне отклика: название бывает и в заголовке вакансии, и в ссылках
+            dlg = page.locator("[role='dialog']").locator("visible=true")
+            opt = (dlg.first if dlg.count() else page).get_by_text(self.cfg.apply.resume_title, exact=False).first
             if opt.count():
                 self._beat()
                 opt.click()

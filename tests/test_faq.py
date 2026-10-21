@@ -58,3 +58,11 @@ def test_learn_replaces_file_atomically(cfg, monkeypatch):
     assert seen == [False]  # пока файл писался, на месте faq.yaml его не было — только готовый целиком
     assert faq.lookup(cfg, "Когда сможете выйти на работу?") == "Через неделю."
     assert not list(cfg.base_dir.glob(".faq.yaml.*"))
+
+
+def test_lookup_looks_at_the_question_not_the_intro(cfg):
+    # бот сначала благодарит за прошлый ответ, потом спрашивает другое — раньше отвечалось на благодарность
+    _write(cfg, [{"match": ["приписное свидетельство"], "answer": "Да, есть приписное свидетельство."}])
+    assert faq.lookup(cfg, "Спасибо, про приписное свидетельство понял. Сколько лет вы работаете с Python?") is None
+    assert faq.lookup(cfg, "Хорошо. Есть ли у вас приписное свидетельство?") == "Да, есть приписное свидетельство."
+    assert faq.lookup(cfg, "Приписное свидетельство") == "Да, есть приписное свидетельство."  # поле анкеты без «?»

@@ -151,3 +151,17 @@ def test_habr_external_link_is_absolute(cfg, monkeypatch):
     status, note = applier.Applier(page, cfg, applier.Mode())._apply_habr(1, f"{scout.HABR}/vacancies/1", "")
     link = f"{scout.HABR}{state['vacancy']['externalLink']}"
     assert status == "manual" and visited[-1] == link and note.endswith(link)
+
+
+@pytest.mark.parametrize("html, captcha", [
+    ("<div role='dialog'><h2>Подтвердите, что вы не робот</h2><input name='captchaText'></div>", True),
+    ("<div role='dialog'><p>Complete the CAPTCHA to continue</p></div>", True),
+    ("<p>Введите текст с картинки</p>", True),
+    # фразы из описаний вакансий — не капча (раньше autopilot ждал капчу 15 минут и останавливал сайт)
+    ("<div data-qa='vacancy-description'><p>Вы общаетесь с живым человеком, а не роботом.</p></div>", False),
+    ("<div><p>We value people: you are a person, not a robot.</p></div>", False),
+])
+def test_captcha_detection(page, html, captcha):
+    from hh_agent.browser import captcha_visible
+    page.set_content(html)
+    assert captcha_visible(page) is captcha

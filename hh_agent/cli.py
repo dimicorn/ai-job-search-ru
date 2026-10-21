@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,8 @@ LOGIN_HINT = {"hh": "как соискатель", "habr": "через Хабр 
 
 def resume_is_template(cfg: Config) -> bool:
     """resume.md ещё не заполнен: его нет или это копия resume.example.md."""
-    path, example = cfg.path(cfg.analyst.resume_file), cfg.path("resume.example.md")
+    from .wizard import sample
+    path, example = cfg.path(cfg.analyst.resume_file), sample(cfg.base_dir, "resume.example.md")
     return not path.exists() or (example.exists() and path.read_text(encoding="utf-8") == example.read_text(encoding="utf-8"))
 
 
@@ -107,10 +109,16 @@ def _edit(text: str) -> str:
     with tempfile.NamedTemporaryFile("w+", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(text)
         path = f.name
-    subprocess.run([os.environ.get("EDITOR", "nano"), path])
-    with open(path, encoding="utf-8") as f:
-        new = f.read().strip()
-    os.unlink(path)
+    editor = shlex.split(os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano")  # «code --wait» — с флагами
+    try:
+        subprocess.run([*editor, path])
+        with open(path, encoding="utf-8") as f:
+            new = f.read().strip()
+    except FileNotFoundError:
+        console.print(f"[red]Не найден редактор {editor[0]!r}[/] — задайте EDITOR (например, nano). Письмо не изменено.")
+        new = ""
+    finally:
+        os.unlink(path)
     return new or text
 
 

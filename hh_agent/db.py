@@ -185,6 +185,10 @@ class DB:
         """Название вакансии (в нижнем регистре) → статус опроса."""
         return {r[0]: r[1] for r in self.conn.execute("SELECT title, status FROM tg_surveys WHERE bot=?", (bot,))}
 
+    def tg_survey_started(self, bot: str, title: str) -> str | None:
+        r = self.conn.execute("SELECT started_at FROM tg_surveys WHERE bot=? AND title=?", (bot, title)).fetchone()
+        return r[0] if r else None
+
     def save_tg_survey(self, bot: str, title: str, status: str, vacancy_id: int | None = None) -> None:
         now = datetime.now().isoformat(timespec="seconds")
         self.conn.execute("INSERT OR IGNORE INTO tg_surveys (bot, title, vacancy_id, started_at) VALUES (?, ?, ?, ?)",

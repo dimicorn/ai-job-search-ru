@@ -2,6 +2,8 @@
 .browser-profile/
 config.yaml
 resume.md
+*.bak
+*.tmp
 *.db
 __pycache__/
 screenshots/

@@ -63,10 +63,11 @@ def _load(cfg: Config) -> list[dict[str, Any]]:
 
 
 def lookup(cfg: Config, text: str) -> str | None:
-    """Ответ из списка или None."""
+    """Ответ из списка или None. Есть вопрос — фрагменты ищутся только в нём: бот часто сначала повторяет
+    тему прошлого ответа («Спасибо, про приписное понял. Расскажите об опыте с PyTorch?»)."""
     if not cfg.questions.faq or (text or "").count("?") > 1:
         return None
-    q, facts = _norm(text), _facts_hash(cfg)
+    q, facts = _norm(question_of(text) if "?" in (text or "") else text), _facts_hash(cfg)
     hits = {str(e["answer"]).strip() for e in _load(cfg)
             if (not e.get("learned") or e.get("facts") == facts)
             and any(_norm(m) and _norm(m) in q for m in e["match"])

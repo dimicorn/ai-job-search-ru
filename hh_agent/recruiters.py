@@ -414,9 +414,14 @@ def _want_switch(cfg: Config, db: DB, client, bot: str, entity) -> bool:
 _SURVEY_START = re.compile(r"отклик на позицию\s+(.+?)\.?\s*(?:\n|$)", re.I)
 
 
-def _current_survey(msgs: list) -> str | None:
-    """Вакансия текущего опроса по приветствию бота: «Получил Ваш отклик на позицию …»."""
+def _current_survey(msgs: list, since: str | None = None) -> str | None:
+    """Вакансия текущего опроса по приветствию бота: «Получил Ваш отклик на позицию …».
+    since — когда начат текущий опрос (местное время): приветствие старше — от прошлого опроса (агент только
+    что выбрал вакансию, а бот ещё не поздоровался по ней)."""
+    after = datetime.fromisoformat(since).astimezone(UTC) if since else None
     for m in reversed(msgs):
+        if after and m.date <= after:
+            return None
         hit = None if m.out else _SURVEY_START.search(m.message or "")
         if hit:
             return hit.group(1).strip().rstrip(".")
@@ -595,7 +600,8 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
         target = hanging or last  # на какое сообщение бота отвечаем
         survey = state["survey"] if state else None
         vid = state["vacancy_id"] if state else None
-        current = _current_survey(msgs)  # опрос мог начаться без агента (выбор вручную, сбой бота)
+        # Опрос мог начаться без агента (выбор вручную, сбой бота) — его видно по приветствию бота.
+        current = _current_survey(msgs, since=db.tg_survey_started(bot, _norm(survey)) if survey else None)
         if current and _norm(current) != _norm(survey or ""):
             survey, vid = current, _match_vacancy(cfg, db, last, current)
             if not dry_run:
@@ -603,7 +609,9 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
                     db.save_tg_survey(bot, _norm(current), "active", vid)
                 db.save_tg_dialog(bot, survey=current, vacancy_id=vid)
         asked_at = time.monotonic()  # с этого момента «читаем и думаем» — см. _human_pause
-        known = faq.lookup(cfg, last.message or "") if hanging is None and not _buttons(last) else None
+        # Только на вопрос: сообщение без «?» бывает и благодарностью («зарплатные ожидания записал») — решает LLM.
+        known = (faq.lookup(cfg, last.message) if hanging is None and not _buttons(last) and "?" in (last.message or "")
+                 else None)
         if known:  # частый вопрос — без вызова LLM
             step = Step(action="reply", text=known, button=-1, missing_fact="", reason="ответ из faq.yaml",
                         final=False, reusable=False)

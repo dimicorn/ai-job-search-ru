@@ -149,3 +149,14 @@ def test_habr_already_applied(site, cfg):
     state = {**HABR_STATE, "vacancy": {"response": {"kind": "applied"}}}
     site.pages[url] = HABR_PAGE.format(state=json.dumps(state))
     assert _applier(site, cfg).apply(1000000003, url, LETTER)[0] == "already_applied"
+
+
+def test_hh_resume_title_is_chosen_in_the_dialog(site, cfg):
+    """Название резюме бывает и в заголовке вакансии — выбирать его надо в окне отклика."""
+    cfg.apply.resume_title = "ML Engineer"
+    resumes = ("<label><input type=radio name=resumeHash value=a checked> Аналитик данных</label>"
+               "<label><input type=radio name=resumeHash value=b> ML Engineer</label>")
+    url = "https://hh.ru/vacancy/6"
+    site.pages[url] = HH_PAGE.format(questions=resumes)  # в заголовке страницы — тоже «ML Engineer»
+    status, _ = _applier(site, cfg, dry_run=True).apply(6, url, LETTER)
+    assert status == "dry_run" and site.is_checked("[name=resumeHash][value=b]")

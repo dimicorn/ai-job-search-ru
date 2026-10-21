@@ -1,4 +1,6 @@
 """Мелкие чистые функции: конфиг, поиск, письма, анкеты, мастер настройки."""
+import shutil
+import sys
 from urllib.parse import parse_qsl, urlparse
 
 import pytest
@@ -109,3 +111,24 @@ def test_no_long_breaks_when_break_every_is_zero(cfg):
     st.done = 5
     st.schedule_pause(cfg, 1.0, dry_run=False)  # раньше — деление на ноль, и поток сайта падал
     assert not st.on_break
+
+
+def test_editor_with_flags(tmp_path, monkeypatch):
+    # EDITOR="code --wait" — с флагами; раньше [e] в review падал с FileNotFoundError
+    from hh_agent.cli import _edit
+    script = tmp_path / "ed.py"
+    script.write_text("import sys\nopen(sys.argv[-1], 'w', encoding='utf-8').write('Новое письмо')\n")
+    monkeypatch.delenv("VISUAL", raising=False)
+    monkeypatch.setenv("EDITOR", f"{sys.executable} -I {script}")
+    assert _edit("Старое письмо") == "Новое письмо"
+    monkeypatch.setenv("EDITOR", "no-such-editor --wait")
+    assert _edit("Старое письмо") == "Старое письмо"  # редактора нет — письмо не теряется
+
+
+def test_samples_from_project_when_config_is_elsewhere(tmp_path):
+    from hh_agent.cli import resume_is_template
+    from hh_agent.config import load_config
+    assert wizard.sample(tmp_path, "config.example.yaml") == wizard.ROOT / "config.example.yaml"
+    shutil.copy(wizard.sample(tmp_path, "config.example.yaml"), tmp_path / "config.yaml")
+    shutil.copy(wizard.sample(tmp_path, "resume.example.md"), tmp_path / "resume.md")
+    assert resume_is_template(load_config(tmp_path / "config.yaml"))  # шаблон узнаётся и без образца рядом

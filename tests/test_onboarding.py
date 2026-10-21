@@ -74,3 +74,12 @@ def test_fill_facts_keeps_filled_facts_and_survives_eof():
     def eof(q):
         raise EOFError
     assert fill_facts(text, ask=eof) == text  # без терминала — без изменений
+
+
+def test_resume_keeps_decorators_but_drops_handles():
+    body = ("<p>Резюме «ML-инженер»</p><p class=\"resume__block\">Обо мне</p>"
+            "<p>Пишу на Python: @dataclass, @property, тесты на @pytest.fixture; Spring — @Transactional.</p>"
+            "<p>Связь: tg @ivan_ml_dev</p><p>@ivan_ml_dev</p>")
+    md = resume.to_markdown(body)
+    assert "@dataclass, @property, тесты на @pytest.fixture; Spring — @Transactional" in md
+    assert "ivan_ml_dev" not in md

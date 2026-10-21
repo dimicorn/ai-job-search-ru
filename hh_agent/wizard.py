@@ -31,6 +31,14 @@ CLOUD = [
 LOCAL = [("Ollama", "http://localhost:11434/v1"), ("LM Studio", "http://localhost:1234/v1")]
 
 
+ROOT = Path(__file__).resolve().parent.parent  # папка проекта: там образцы config, resume и faq
+
+
+def sample(base: Path, name: str) -> Path:
+    """Образец (config.example.yaml и т.п.): рядом с конфигом, иначе из папки проекта (конфиг лежит не в ней: -c)."""
+    return base / name if (base / name).exists() else ROOT / name
+
+
 class _Ping(BaseModel):
     ok: bool
 
@@ -210,11 +218,11 @@ def setup(config_path: Path) -> None:
 
     base = config_path.parent
     if not config_path.exists():
-        shutil.copy(base / "config.example.yaml", config_path)
+        shutil.copy(sample(base, "config.example.yaml"), config_path)
         console.print(f"Создан {config_path.name} из config.example.yaml.")
     for src, dst in (("resume.example.md", "resume.md"), ("faq.example.yaml", "faq.yaml")):
-        if (base / src).exists() and not (base / dst).exists():
-            shutil.copy(base / src, base / dst)
+        if sample(base, src).exists() and not (base / dst).exists():
+            shutil.copy(sample(base, src), base / dst)
             console.print(f"Создан {dst} из {src}.")
 
     values = _choose(base)

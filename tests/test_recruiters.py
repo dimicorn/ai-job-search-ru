@@ -160,3 +160,35 @@ def test_empty_reply_goes_to_human(cfg, db, bot, monkeypatch):
     bot.add("Расскажите о вашем опыте с PyTorch?")
     assert _dialog(cfg, db, bot) == "human"
     assert bot.sent == []
+
+
+def test_faq_does_not_answer_acknowledgement(cfg, db, bot, monkeypatch):
+    """«Спасибо, про приписное понял. Расскажите об опыте с PyTorch?» — отвечает LLM, а не faq про приписное."""
+    import yaml
+    cfg.path(cfg.questions.faq_file).write_text(yaml.safe_dump(
+        [{"match": ["приписное свидетельство"], "answer": "Да, есть приписное свидетельство."},
+         {"match": ["зарплатные ожидания"], "answer": "150 000 ₽"}], allow_unicode=True), encoding="utf-8")
+    monkeypatch.setattr(r, "_human_pause", lambda *a: 0)
+    monkeypatch.setattr(r, "_decide", lambda *a, **k: _step("reply", final=True))
+    bot.add("Спасибо, про приписное свидетельство понял. Расскажите о своём опыте с PyTorch?")
+    _dialog(cfg, db, bot)
+    assert bot.sent[0] == "Есть опыт."
+    bot.add("Ваши зарплатные ожидания записал, передам рекрутеру.")  # без вопроса — не повод отвечать из faq
+    _dialog(cfg, db, bot)
+    assert "150 000 ₽" not in bot.sent
+
+
+def test_old_greeting_does_not_override_just_chosen_vacancy(cfg, db, bot, monkeypatch):
+    """Агент выбрал вакансию, бот ещё не поздоровался по ней: приветствие прошлого опроса — не текущий опрос
+    (раньше он регистрировался как начатый и больше не предлагался)."""
+    bot.add("Получил Ваш отклик на позицию Аналитик данных.", ago=timedelta(days=1))
+    db.save_tg_survey(BOT, r._norm("Middle Data Scientist"), "active", 1)
+    db.save_tg_dialog(BOT, status="active", survey="Middle Data Scientist", vacancy_id=1)
+    bot.add("Спасибо за выбор вакансии!")
+    monkeypatch.setattr(r, "_decide", lambda *a, **k: _step("wait"))
+    _dialog(cfg, db, bot)
+    assert "аналитик данных" not in db.tg_surveys(BOT)
+    assert db.tg_dialog(BOT)["survey"] == "Middle Data Scientist"
+    bot.add("Получил Ваш отклик на позицию Data Engineer.")  # новое приветствие — новый опрос, его видно
+    assert r._current_survey(bot.messages, since=db.tg_survey_started(BOT, r._norm("Middle Data Scientist"))) \
+        == "Data Engineer"

@@ -24,12 +24,21 @@ _CONTACT = re.compile(
     r"\+\d[\d\s()\-]{8,}\d"                              # телефон в международном формате
     r"|\b8[\s(\-]*\d{3}[\s)\-]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}\b"  # и 8 (999) 123-45-67
     r"|[\w.+-]+@[\w-]+\.[\w.-]+"                         # почта
-    r"|(?<![\w/])@[A-Za-z]\w{3,}"                         # ник в мессенджере
     r"|\b(?:telegram|телеграм|whatsapp|viber|skype)\s*:\s*\S+", re.I)  # «Telegram: …» (с двоеточием)
+# Ник в мессенджере — только в строке про связь или один в строке: @dataclass, @Transactional и т.п. —
+# это навыки, их из резюме не убираем.
+_HANDLE = re.compile(r"(?<![\w/])@[A-Za-z]\w{3,}")
+_CONTACT_LINE = re.compile(r"telegram|телеграм|\btg\b|\bтг\b|whatsapp|viber|skype|\bник|\bnick|контакт|связ|пишите",
+                           re.I)
 
 
 def _text(fragment: str) -> list[str]:
     return [line.strip() for line in html_to_text(re.sub(r"<(div|tr|p)\b", r"\n<\1", fragment)).splitlines()]
+
+
+def _strip_handles(line: str) -> str:
+    alone = _HANDLE.fullmatch(line.strip(" -•\t"))
+    return _HANDLE.sub("", line) if alone or _CONTACT_LINE.search(line) else line
 
 
 def to_markdown(export_html: str) -> str:
@@ -64,7 +73,7 @@ def to_markdown(export_html: str) -> str:
             lines += ([""] if gap else []) + [line]
             gap = False
         out += lines + [""]
-    text = "\n".join(out)
+    text = "\n".join(_strip_handles(line) for line in out)
     text = _CONTACT.sub("", text.replace("\xa0", " "))
     return re.sub(r"\n{3,}", "\n\n", text).strip() + "\n"
 

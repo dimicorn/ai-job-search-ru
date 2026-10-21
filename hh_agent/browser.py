@@ -130,7 +130,9 @@ class CaptchaError(Exception):
 # («Complete the CAPTCHA» / «Подтвердите, что вы не робот») — после нажатия «Отправить».
 _CAPTCHA_SEL = ("[data-qa='account-captcha-input'], [data-qa*='captcha'], iframe[src*='captcha'], "
                 "img[src*='captcha'], input[name*='captcha' i]")
-_CAPTCHA_TEXT = r"Complete the CAPTCHA|not a robot|не робот|Введите текст с картинки|Text from the picture"
+# Только формулировки самой капчи: «а не роботом» или «not a robot» бывает и в описании вакансии.
+_CAPTCHA_TEXT = (r"Complete the CAPTCHA|подтвердите,? что вы не робот|(?:confirm|verify) (?:that )?you(?:'re| are) not a robot"
+                 r"|Введите текст с картинки|Text from the picture")
 
 
 def captcha_visible(page: Page) -> bool:
