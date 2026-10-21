@@ -6,7 +6,7 @@
   hh.ru, Хабр  — отклики, у каждого сайта свои паузы и счётчик ошибок; вакансии берутся из базы
                  по одной, пока поиск-оценка ещё идёт — ждут новых;
   Telegram     — опросы AI-рекрутеров; повторяется, когда появляются новые отклики в их компании.
-Дневной лимит и лимит запуска общие для сайтов.
+Дневной лимит и лимит запуска общие для сайтов. Ctrl+C или SIGTERM — остановка с итогом (stop.py).
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta
 
 from . import analyst as analyst_mod
-from . import recruiters
+from . import recruiters, stop
 from .applier import Applier, Mode
 from .browser import SITES, CaptchaError, SiteTabs, attach, free_port, is_logged_in, open_browser, source_of
 from .config import Config
@@ -34,14 +34,17 @@ def _log(msg: str) -> None:
 
 
 def _thread(target, *args, name: str) -> threading.Thread:
-    """Поток, ошибка которого попадает в журнал, а не обрывает запуск молча."""
+    """Поток, ошибка которого попадает в журнал, а не обрывает запуск молча. После остановки ошибки
+    не сбой (браузер закрыт по Ctrl+C); второй Ctrl+C завершает процесс, не дожидаясь потока (daemon)."""
     def body():
         try:
             target(*args)
         except Exception as e:
+            if stop.requested():
+                return
             _log(f"[red]Сбой потока: {e!r}[/]")
             log_event(args[0], "error", where=f"thread {name}", message=repr(e)[:500])
-    return threading.Thread(target=body, name=name)
+    return threading.Thread(target=body, name=name, daemon=True)
 
 
 def _in_window(cfg: Config, now: datetime | None = None) -> bool:
@@ -58,13 +61,13 @@ def _scaled(rng: tuple[float, float], k: float) -> float:
 
 
 def _sleep(seconds: float, why: str, cfg: Config, dry_run: bool) -> bool:
-    """Пауза; False — если окно рабочих часов закроется раньше, чем она кончится."""
+    """Пауза (её обрывает остановка); False — если окно рабочих часов закроется раньше, чем она кончится."""
     until = datetime.now() + timedelta(seconds=seconds)
     if not dry_run and not _in_window(cfg, until):
         _log(f"[yellow]Следующий отклик выпал бы за рабочие часы {cfg.apply.auto.active_hours} — заканчиваю.[/]")
         return False
     _log(f"{why}: {seconds / 60:.1f} мин (до {until:%H:%M:%S})")
-    time.sleep(seconds)
+    stop.wait(seconds)
     return True
 
 
@@ -135,7 +138,7 @@ class Run:
     def reserve(self, db: DB) -> bool:
         """Занять место под отклик в общих лимитах (запуска и дневном); False — лимит исчерпан."""
         with self.lock:
-            if self.stop_reason:
+            if self.stop_reason or stop.requested():
                 return False
             if self.done + self.inflight >= self.max_n:
                 reason = "лимит запуска"
@@ -186,14 +189,14 @@ def _apply_worker(cfg: Config, run: Run, src: str, mode: Mode, pace: float, cdp_
     analyst = None
     with attach(cdp_port) as (_, page):
         st = Site(src, Applier(page, cfg, mode))
-        while run.stop_reason is None:
+        while run.stop_reason is None and not stop.requested():
             if not dry_run and not _in_window(cfg):
                 run.stop("рабочие часы")
                 break
             row = run.next_row(db, src)
             if row is None:
                 if run.producing.is_set():
-                    time.sleep(5)  # поиск и оценка ещё идут — новые вакансии появятся
+                    stop.wait(5)  # поиск и оценка ещё идут — новые вакансии появятся
                     continue
                 break
             wait = st.next_ready - time.monotonic()
@@ -201,6 +204,8 @@ def _apply_worker(cfg: Config, run: Run, src: str, mode: Mode, pace: float, cdp_
                 what = "Длинный перерыв" if st.on_break else "Пауза до следующего отклика"
                 if not _sleep(wait, what, cfg, dry_run):
                     run.stop("рабочие часы")
+                    break
+                if stop.requested():
                     break
             title = f"{row['title']} — {row['company']} ({row['score']})"
             if au.skip_employer_tests and row["has_test"]:
@@ -218,6 +223,8 @@ def _apply_worker(cfg: Config, run: Run, src: str, mode: Mode, pace: float, cdp_
                         letter = analyst.letter(row)
                         db.update(row["id"], cover_letter=letter)
                     except (analyst_mod.LimitReached, RuntimeError) as e:
+                        if stop.requested():
+                            break
                         _log(f"[red]Не удалось написать письмо[/] для {title}: {e}")
                         continue
                 _log(f"Откликаюсь: {title}")
@@ -229,6 +236,9 @@ def _apply_worker(cfg: Config, run: Run, src: str, mode: Mode, pace: float, cdp_
                     _log(f"[red]{e}[/] — на {SITES[src]} больше не откликаюсь, вакансия осталась в очереди.")
                     break
                 except Exception as e:  # вёрстка меняется — считаем ошибки подряд
+                    if stop.requested():  # браузер закрыт по Ctrl+C — отклик не сбой, вакансия в очереди
+                        _log(f"[yellow]Отклик прерван[/] — {title} осталась в очереди")
+                        break
                     st.errors += 1
                     db.update(row["id"], status="error", error=f"applier: {e}"[:500])
                     _log(f"[red]Ошибка[/] ({st.errors}/{au.max_consecutive_errors}): {e}")
@@ -281,10 +291,13 @@ def _produce(cfg: Config, run: Run, cdp_port: int) -> None:
             t.start()
         for t in threads:
             t.join()
+        if stop.requested():
+            return
         _log(f"Новых вакансий после фильтров: {sum(found)}")
         analyst_mod.analyze_new(cfg, DB(cfg.path(cfg.db_path)))
     except Exception as e:
-        _log(f"[red]Поиск и оценка: {e}[/]")
+        if not stop.requested():
+            _log(f"[red]Поиск и оценка: {e}[/]")
     finally:
         run.producing.clear()
 
@@ -293,7 +306,7 @@ def _telegram(cfg: Config, dry_run: bool, cdp_port: int, others: list[threading.
     """Опросы AI-рекрутеров; заново — когда появились новые отклики в их компании, и в конце."""
     db = DB(cfg.path(cfg.db_path))
     seen = None
-    while True:
+    while not stop.requested():
         alive = any(t.is_alive() for t in others)
         applies = len(recruiters._company_applies(cfg, db))
         if applies != seen:
@@ -301,13 +314,13 @@ def _telegram(cfg: Config, dry_run: bool, cdp_port: int, others: list[threading.
             try:
                 recruiters.run(cfg, db, dry_run=dry_run, cdp_port=cdp_port)
             except Exception as e:
-                _log(f"[red]Telegram: {e}[/]")
+                if not stop.requested():
+                    _log(f"[red]Telegram: {e}[/]")
         if not alive:
             return
         for _ in range(30):  # через 30 с проверить новые отклики, но закончить сразу, как закончат остальные
-            if not any(t.is_alive() for t in others):
+            if not any(t.is_alive() for t in others) or stop.wait(1):
                 break
-            time.sleep(1)
 
 
 def run_auto(cfg: Config, db: DB, dry_run: bool = False, limit: int | None = None,
@@ -366,15 +379,20 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
         with console.sequential(order, lambda name: _section(name, sites)):
             for t in threads:
                 t.start()
-            for key, _ in order:
-                for t in threads:
-                    if _section(t.name, sites) == key:
-                        t.join()
-                console.section_done(key)
+            try:
+                for key, _ in order:
+                    for t in threads:
+                        if _section(t.name, sites) == key:
+                            t.join()
+                    console.section_done(key)
+            except KeyboardInterrupt:  # Ctrl+C или SIGTERM — потоки заканчивают текущий шаг
+                _log(f"[yellow]{stop.reason()} — останавливаюсь: новых откликов и опросов не начинаю. "
+                     f"Ещё раз {stop.reason()} — выйти сразу.[/]")
             for t in threads:
                 t.join()
 
-    stop_reason = run.stop_reason or "кандидаты закончились"
+    stop_reason = (f"остановлено ({stop.reason()})" if stop.requested()
+                   else run.stop_reason or "кандидаты закончились")
     log_event(cfg, "auto_end", dry_run=dry_run, done=run.done, stop_reason=stop_reason,
               applied_today=db.applied_today(), pace=pace, produce=produce)
     _log(f"Готово: {'заполнено форм' if dry_run else 'откликов'} — {run.done}. "

@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
+from . import stop
 from .config import Config
 from .db import DB, dec_list
 from .events import log_event
@@ -245,17 +246,24 @@ def _chunks(seq, n):
 
 def _in_parallel(cfg: Config, fn, chunks):
     """fn(пачка) для всех пачек сразу — до analyst.parallel запросов к LLM одновременно.
-    Выдаёт (пачка, результат, ошибка) по мере готовности; после LimitReached новые запросы не начинает."""
+    Выдаёт (пачка, результат, ошибка) по мере готовности; после LimitReached и остановки (Ctrl+C)
+    новые запросы не начинает."""
     with ThreadPoolExecutor(max_workers=max(1, cfg.analyst.parallel), thread_name_prefix="LLM") as ex:
         futs = {ex.submit(fn, c): c for c in chunks}
-        for f in as_completed(futs):
-            if f.cancelled():
-                continue
-            err = f.exception()
-            if isinstance(err, LimitReached):
-                for other in futs:
-                    other.cancel()
-            yield futs[f], (None if err else f.result()), err
+        try:
+            for f in as_completed(futs):
+                if stop.requested():
+                    return
+                if f.cancelled():
+                    continue
+                err = f.exception()
+                if isinstance(err, LimitReached):
+                    for other in futs:
+                        other.cancel()
+                yield futs[f], (None if err else f.result()), err
+        finally:
+            for other in futs:  # прервали — запросы, которые ещё не начались, не начинать
+                other.cancel()
 
 
 def _write_letters(cfg: Config, db: DB, analyst: Analyst, rows) -> int:
@@ -306,7 +314,7 @@ def analyze_new(cfg: Config, db: DB) -> int:
             color = "green" if a.score >= cfg.analyst.min_score else "dim"
             console.print(f"  [{color}]{a.score:>3}[/] {row['title']} — {row['company']}")
             done += 1
-    if not analyst.letters_here and not limit:
+    if not analyst.letters_here and not limit and not stop.requested():
         need = [db.get(r["id"]) for r in rows]
         need = [r for r in need if r and r["status"] == "scored" and (r["score"] or 0) >= cfg.analyst.min_score
                 and not r["cover_letter"]]

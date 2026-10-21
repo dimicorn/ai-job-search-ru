@@ -17,6 +17,7 @@ except ImportError:
 
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 
+from . import stop
 from .config import Config
 
 HH = "https://hh.ru"
@@ -81,7 +82,11 @@ def open_browser(cfg: Config, headless: bool = False,
         try:
             yield ctx, page
         finally:
-            ctx.close()
+            try:
+                ctx.close()
+            except Exception:
+                if not stop.requested():  # после Ctrl+C браузер уже закрыл драйвер Playwright
+                    raise
 
 
 @contextmanager
@@ -102,7 +107,11 @@ def attach(cdp_port: int) -> Iterator[tuple[BrowserContext, Page]]:
                 page.close()
             except Exception:
                 pass
-            b.close()  # отключиться от браузера; сам браузер закроет open_browser
+            try:
+                b.close()  # отключиться от браузера; сам браузер закроет open_browser
+            except Exception:
+                if not stop.requested():
+                    raise
 
 
 def pause(rng: tuple[float, float]) -> None:
@@ -160,6 +169,7 @@ def _wait_for_human(page: Page) -> None:
     print(f"\n⚠️  hh.ru показал капчу. Пройдите её в окне браузера — жду до {wait_s // 60} мин…", flush=True)
     t0 = time.monotonic()
     while time.monotonic() - t0 < wait_s:
+        stop.check()
         page.wait_for_timeout(3000)
         if not captcha_visible(page):
             if _CFG:

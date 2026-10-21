@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import analyst as analyst_mod
-from . import recruiters
+from . import recruiters, stop
 from .applier import apply_one
 from .autopilot import run_auto
 from .browser import LOGIN_URL, SITES, SiteTabs, is_logged_in, open_browser, pause, source_of
@@ -372,7 +372,17 @@ def main() -> None:
     if a.cmd in (None, "help"):
         cmd_help(sub)
         return
+    stop.install()
+    try:
+        _dispatch(a)
+    except KeyboardInterrupt:
+        console.print(f"\n[yellow]Остановлено ({stop.reason()}).[/]")
+        raise SystemExit(stop.exit_code()) from None
+    if stop.requested():  # autopilot остановился сам и подвёл итог
+        raise SystemExit(stop.exit_code())
 
+
+def _dispatch(a: argparse.Namespace) -> None:
     config_path = Path(a.config).expanduser().resolve()
     if a.cmd == "doctor":  # работает и без конфига — подскажет, что его нет
         from .doctor import run as doctor

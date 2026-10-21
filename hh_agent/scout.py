@@ -8,6 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from playwright.sync_api import Page
 
+from . import stop
 from .browser import HABR, HH, SITES, check_captcha, page_state, pause
 from .config import Config, Filters, Search
 from .db import DB
@@ -214,6 +215,7 @@ def scan(cfg: Config, db: DB, page: Page, sources: set[str] | None = None) -> in
         stats = {"source": s.source, "total": None, "pages": 0, "added": 0, "filtered": 0, "seen": 0}
         by_date = sorted_by_date(s)
         for n in range(s.max_pages):
+            stop.check()  # SIGTERM в autopilot: браузер жив, но новые страницы не нужны
             total, cards = search_page(page, s, n)
             if n == 0:
                 stats["total"] = total
@@ -227,6 +229,7 @@ def scan(cfg: Config, db: DB, page: Page, sources: set[str] | None = None) -> in
                 console.print(f"Страница {n + 1}: новых нет — дальше только уже известные, поиск закончен.")
                 break
             for vid, card, responded in cards:
+                stop.check()
                 if db.exists(vid):
                     stats["seen"] += 1
                     continue

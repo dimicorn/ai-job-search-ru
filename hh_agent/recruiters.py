@@ -28,7 +28,7 @@ from urllib.parse import unquote
 from playwright.sync_api import Page
 from pydantic import BaseModel
 
-from . import faq
+from . import faq, stop
 from .browser import HH, CaptchaError, attach, check_captcha, notify, open_browser
 from .config import Config
 from .db import DB
@@ -266,9 +266,13 @@ def _messages(client, entity, limit: int) -> list:
 def _idle(seconds: float) -> None:
     """Пауза, во время которой Telethon работает: синхронный клиент обслуживает соединение (ping, ответы
     сервера, «печатает…») только внутри своего цикла событий. После time.sleep дольше минуты Telegram
-    рвёт соединение, и Telethon сыплет «Server replied with a wrong session ID»."""
-    if seconds > 0:
-        asyncio.get_event_loop().run_until_complete(asyncio.sleep(seconds))
+    рвёт соединение, и Telethon сыплет «Server replied with a wrong session ID».
+    Остановка (Ctrl+C, SIGTERM) обрывает паузу исключением stop.Stopped — ответ боту после неё не уйдёт."""
+    end = time.monotonic() + seconds
+    while (left := end - time.monotonic()) > 0:
+        stop.check()
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(min(left, 1)))
+    stop.check()
 
 
 def _snapshot(client, entity) -> list[tuple]:
@@ -711,6 +715,7 @@ def run(cfg: Config, db: DB, dry_run: bool = False, cdp_port: int | None = None)
             console.print("[yellow]Telegram: нет входа — выполните в терминале: uv run hh-agent login[/]")
             return
         for bot in bots:
+            stop.check()
             try:
                 entity = client.get_entity(bot)
             except ValueError:
