@@ -79,6 +79,11 @@ COLUMNS = {
 }
 
 
+# Статусы, которые устаревают, когда отклик на вакансию появился на сайте. filtered («уже откликались»,
+# стоп-слово) и applied не трогаем: по ним агент ничего не делает.
+RESPONDABLE = ("new", "scored", "skipped", "manual", "error", "unconfirmed")
+
+
 class DB:
     def __init__(self, path: Path):
         # Соединение — на поток (sqlite3 не делит их между потоками); WAL — чтение не ждёт записи.
@@ -123,6 +128,16 @@ class DB:
             args.append(min_score)
         q += " ORDER BY score DESC, found_at DESC"
         return self.conn.execute(q, args).fetchall()
+
+    def mark_responded(self, vid: int, note: str) -> str | None:
+        """Сайт показывает, что отклик есть (вы откликнулись сами, неподтверждённый всё же ушёл) — статус applied.
+        Дату отклика не трогаем: неизвестная (None) в дневной лимит не идёт, у unconfirmed она уже есть.
+        Возвращает прежний статус, если он поменялся."""
+        row = self.get(vid)
+        if row is None or row["status"] not in RESPONDABLE:
+            return None
+        self.update(vid, status="applied", error=f"{note} (было: {row['status']})")
+        return row["status"]
 
     def get(self, vid: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM vacancies WHERE id=?", (vid,)).fetchone()

@@ -212,7 +212,7 @@ def scan(cfg: Config, db: DB, page: Page, sources: set[str] | None = None) -> in
             continue
         search_page, fetch_details = SOURCES[s.source]
         console.rule(f"[bold]Поиск: {s.name}[/] ({SITES[s.source]})")
-        stats = {"source": s.source, "total": None, "pages": 0, "added": 0, "filtered": 0, "seen": 0}
+        stats = {"source": s.source, "total": None, "pages": 0, "added": 0, "filtered": 0, "seen": 0, "responded": 0}
         by_date = sorted_by_date(s)
         for n in range(s.max_pages):
             stop.check()  # SIGTERM в autopilot: браузер жив, но новые страницы не нужны
@@ -223,6 +223,10 @@ def scan(cfg: Config, db: DB, page: Page, sources: set[str] | None = None) -> in
             if not cards:
                 break
             stats["pages"] += 1
+            for vid, card, responded in cards:  # отклик есть на сайте (в том числе ваш) — статус в базе актуален
+                if responded and (was := db.mark_responded(vid, "отклик есть на сайте")):
+                    stats["responded"] += 1
+                    console.print(f"  [green]✓[/] уже откликались: {card['title']} — {card['company']} (было {was})")
             if by_date and all(db.exists(vid) for vid, _, _ in cards):
                 # Выдача по дате: страница целиком из известных — дальше только более старые.
                 stats["seen"] += len(cards)
