@@ -111,8 +111,8 @@ def test_outcomes_are_recorded(auto, db):
     autopilot.run_auto(auto, db)
     assert db.get(1)["status"] == "manual" and db.get(1)["error"] == "у работодателя тест"
     assert db.get(2)["status"] == "unconfirmed" and db.get(2)["applied_at"]  # мог уйти — в дневной лимит
-    assert db.get(3)["status"] == "applied" and db.get(3)["applied_at"] is None  # не новый отклик
-    assert _end(auto)["done"] == 0
+    assert db.get(3)["status"] == "applied" and db.get(3)["applied_at"]  # узнали сейчас — в дневной лимит
+    assert db.applied_today() == 2 and _end(auto)["done"] == 0  # но откликами этого запуска не считаются
 
 
 def test_consecutive_errors_stop_the_site(auto, db):

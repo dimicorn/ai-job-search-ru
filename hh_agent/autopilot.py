@@ -167,8 +167,9 @@ def _record(db: DB, st: Site, row, status: str, note: str | None) -> bool:
         _log(f"[cyan]dry-run[/] {note}")
         return True
     if status == "already_applied":
-        # Отклик был раньше: applied без applied_at — не тратит дневной лимит, паузы не нужно.
-        db.update(row["id"], status="applied", applied_at=None, error=note)
+        # Отклик был раньше (не агентом): дата отклика — когда агент это узнал, в дневной лимит идёт.
+        # Паузы не нужно: агент ничего не отправлял.
+        db.update(row["id"], status="applied", applied_at=now, error=note)
         _log("[dim]отклик уже был — пропускаю[/]")
         return False
     if status == "applied":

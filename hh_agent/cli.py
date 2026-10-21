@@ -186,12 +186,12 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
                                                  analyst_mod._vacancy_prompt(db.get(row["id"])))
                     except Exception as e:  # вёрстка hh меняется — не роняем всю сессию
                         status, note = "error", f"applier: {e}"
-                    # «Отклик уже был» — applied без applied_at: в дневной лимит не идёт. Неподтверждённый
-                    # отклик мог уйти — в лимит идёт, как в auto.
+                    # «Отклик уже был» — applied с датой, когда агент это узнал; неподтверждённый мог уйти.
+                    # Оба идут в дневной лимит, как в auto.
                     db.update(
                         row["id"], status="applied" if status == "already_applied" else status, error=note,
                         applied_at=(datetime.now().isoformat(timespec="seconds")
-                                    if status in ("applied", "unconfirmed") else None),
+                                    if status in ("applied", "already_applied", "unconfirmed") else None),
                     )
                     color = {"applied": "green", "already_applied": "dim", "manual": "yellow"}.get(status, "red")
                     console.print(f"[{color}]{status}[/] {note or ''}")

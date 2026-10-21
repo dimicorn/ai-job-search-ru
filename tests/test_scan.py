@@ -45,7 +45,10 @@ def test_known_vacancy_responded_on_site_becomes_applied(cfg, db, site, status):
     scout.scan(cfg, db, page=None)
     row = db.get(5)
     assert row["status"] == "applied" and f"было: {status}" in row["error"]
-    assert row["applied_at"] == ("2026-10-20T10:00:00" if status == "unconfirmed" else None)  # дата не выдумывается
+    if status == "unconfirmed":
+        assert row["applied_at"] == "2026-10-20T10:00:00"  # дата отправки уже была — остаётся
+    else:
+        assert db.applied_today() == 1  # дата отклика — когда агент узнал, в дневной лимит идёт
 
 
 @pytest.mark.parametrize("status", ["applied", "filtered"])

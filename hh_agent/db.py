@@ -131,12 +131,13 @@ class DB:
 
     def mark_responded(self, vid: int, note: str) -> str | None:
         """Сайт показывает, что отклик есть (вы откликнулись сами, неподтверждённый всё же ушёл) — статус applied.
-        Дату отклика не трогаем: неизвестная (None) в дневной лимит не идёт, у unconfirmed она уже есть.
+        Дата отклика — когда агент это узнал (в дневной лимит идёт); у unconfirmed она уже есть — не меняем.
         Возвращает прежний статус, если он поменялся."""
         row = self.get(vid)
         if row is None or row["status"] not in RESPONDABLE:
             return None
-        self.update(vid, status="applied", error=f"{note} (было: {row['status']})")
+        self.update(vid, status="applied", error=f"{note} (было: {row['status']})",
+                    applied_at=row["applied_at"] or datetime.now().isoformat(timespec="seconds"))
         return row["status"]
 
     def get(self, vid: int) -> sqlite3.Row | None:
