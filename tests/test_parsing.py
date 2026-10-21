@@ -128,3 +128,21 @@ def test_extract_employer_questions(page):
     assert [page.is_checked(f"[name=task_3][value='{v}']") for v in "123"] == [True, False, True]
     assert page.input_value("[name=task_4]") == "Санкт-Петербург"
     assert page.is_checked("[name=consent]")
+
+
+def test_habr_external_link_is_absolute(cfg, monkeypatch):
+    """Хабр отдаёт ссылку на отклик на сайте компании относительной — открыть её как есть нельзя."""
+    from types import SimpleNamespace
+
+    from hh_agent import applier
+
+    state = load("habr_vacancy_state.json")
+    assert state["vacancy"]["externalLink"].startswith("/")
+    visited = []
+    page = SimpleNamespace(goto=lambda url, **kw: visited.append(url))
+    monkeypatch.setattr(applier, "page_state", lambda p: state)
+    monkeypatch.setattr(applier, "check_captcha", lambda p: None)
+    monkeypatch.setattr(applier.Applier, "_hand_over", lambda self, letter, note: ("manual", note))
+    status, note = applier.Applier(page, cfg, applier.Mode())._apply_habr(1, f"{scout.HABR}/vacancies/1", "")
+    link = f"{scout.HABR}{state['vacancy']['externalLink']}"
+    assert status == "manual" and visited[-1] == link and note.endswith(link)

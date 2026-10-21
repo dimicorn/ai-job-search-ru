@@ -18,13 +18,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urljoin
 
 from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PWTimeout
 from rich.panel import Panel
 
 from . import questions
-from .browser import CaptchaError, captcha_visible, check_captcha, page_state, pause, source_of
+from .browser import HABR, CaptchaError, captcha_visible, check_captcha, page_state, pause, source_of
 from .config import Config
 from .events import SESSION, log_event
 from .learning import Store
@@ -420,10 +421,11 @@ class Applier:
             return "already_applied", "отклик уже был"
         if v.get("archived"):
             return "manual", "вакансия в архиве"
-        if v.get("externalLink"):
+        if v.get("externalLink"):  # бывает относительной: /vacancies/<id>/external_response
+            link = urljoin(HABR, v["externalLink"])
             if self.mode.interactive:
-                page.goto(v["externalLink"], wait_until="domcontentloaded")
-            return self._hand_over(letter, f"отклик на сайте компании: {v['externalLink']}")
+                page.goto(link, wait_until="domcontentloaded")
+            return self._hand_over(letter, f"отклик на сайте компании: {link}")
         if cr.get("responsesThresholdNotify") and cr.get("responsesLeft") == 0:
             return "manual", "исчерпан лимит откликов на Хабр Карьере"
 
