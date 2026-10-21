@@ -65,6 +65,10 @@ def _yaml(v: Any) -> str:
 
 def _set(text: str, key: str, value: Any) -> str:
     """Задать analyst.<key> в тексте config.yaml, не трогая комментарии; нет ключа — добавить после model."""
+    if not re.search(r"^analyst:", text, re.M):
+        text = text.rstrip("\n") + "\n\nanalyst:\n"
+    if text.startswith("analyst:"):
+        text = "\n" + text
     start = text.index("\nanalyst:")
     end = re.search(r"\n\S", text[start + 1:])
     end = start + 1 + end.start() if end else len(text)

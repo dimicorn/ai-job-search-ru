@@ -95,3 +95,17 @@ def test_wizard_set_keeps_comments_and_adds_missing_keys():
 ])
 def test_wizard_yaml(value, yaml_text):
     assert wizard._yaml(value) == yaml_text
+
+
+def test_wizard_set_adds_missing_analyst_section():
+    text = wizard._set("searches: []\n", "backend", "codex")
+    assert "analyst:\n  backend: codex" in text and text.startswith("searches: []")
+
+
+def test_no_long_breaks_when_break_every_is_zero(cfg):
+    from hh_agent.autopilot import Site
+    cfg.apply.auto.break_every = 0
+    st = Site("hh", None)
+    st.done = 5
+    st.schedule_pause(cfg, 1.0, dry_run=False)  # раньше — деление на ноль, и поток сайта падал
+    assert not st.on_break

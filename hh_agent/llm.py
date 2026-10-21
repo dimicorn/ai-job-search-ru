@@ -194,7 +194,7 @@ def api_key(cfg: Config) -> str:
     if env.exists():
         for line in env.read_text(encoding="utf-8").splitlines():
             k, _, v = line.partition("=")
-            if k.strip() == name:
+            if k.strip().removeprefix("export ").strip() == name:  # и «export KEY=…» (для source .env)
                 return v.strip().strip('"').strip("'")
     return ""
 

@@ -140,3 +140,23 @@ def test_productive_switches_are_not_limited(cfg, db, bot, monkeypatch):
     assert _dialog(cfg, db, bot) == "done"
     assert bot.sent.count("/change_vacancy") == len(vacancies) > r.MAX_SWITCHES
     assert left() == []
+
+
+def test_wait_bot_gives_up_on_endless_edits(monkeypatch):
+    # бот без конца правит сообщение (таймер, «обрабатываю…») — раньше ожидание не кончалось никогда
+    import itertools
+    tick = itertools.count()
+    monkeypatch.setattr(r, "_idle", lambda seconds: None)
+    monkeypatch.setattr(r, "_snapshot", lambda client, entity: [(1, next(tick), "обрабатываю", 0)])
+    assert r._wait_bot(None, None, timeout=0.05) is True
+
+
+def test_empty_reply_goes_to_human(cfg, db, bot, monkeypatch):
+    # пустое сообщение Telegram не примет — раньше это обрывало обход всех ботов
+    monkeypatch.setattr(r, "notify", lambda *a: None)
+    monkeypatch.setattr(r, "_human_pause", lambda *a: 0)
+    empty = _step("reply").model_copy(update={"text": "  "})
+    monkeypatch.setattr(r, "_decide", lambda *a, **k: empty)
+    bot.add("Расскажите о вашем опыте с PyTorch?")
+    assert _dialog(cfg, db, bot) == "human"
+    assert bot.sent == []

@@ -46,3 +46,15 @@ def test_match_written_as_string_is_one_fragment(cfg):
     assert faq.lookup(cfg, "Какой у вас опыт с PyTorch?") is None
     assert faq.lookup(cfg, "Ваши ожидания по зарплате?") == "150 000"
     assert faq.lookup(cfg, "Минимальная зарплата?") is None
+
+
+def test_learn_replaces_file_atomically(cfg, monkeypatch):
+    # lookup из другого потока не должен увидеть файл наполовину записанным
+    seen = []
+    real_replace = faq.os.replace
+    monkeypatch.setattr(faq.os, "replace", lambda a, b: (seen.append(cfg.path(cfg.questions.faq_file).exists()),
+                                                         real_replace(a, b)))
+    faq.learn(cfg, "Когда сможете выйти на работу?", "Через неделю.")
+    assert seen == [False]  # пока файл писался, на месте faq.yaml его не было — только готовый целиком
+    assert faq.lookup(cfg, "Когда сможете выйти на работу?") == "Через неделю."
+    assert not list(cfg.base_dir.glob(".faq.yaml.*"))

@@ -143,3 +143,10 @@ def test_codex_not_logged_in(cfg, monkeypatch):
     _codex_run(monkeypatch, "", stderr="Error: Not logged in. Run `codex login`.")
     with pytest.raises(SystemExit, match="codex login"):
         llm.run_codex("prompt", Ping, cfg=cfg)
+
+
+def test_api_key_from_env_file_with_export(cfg, monkeypatch):
+    monkeypatch.delenv("HH_TEST_KEY", raising=False)
+    cfg.analyst.api_key_env = "HH_TEST_KEY"
+    cfg.path(".env").write_text("# ключи\nexport HH_TEST_KEY='sk-123'\n", encoding="utf-8")
+    assert llm.api_key(cfg) == "sk-123"

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import threading
 from typing import Any
@@ -89,6 +90,9 @@ def learn(cfg: Config, text: str, answer: str) -> None:
                 break
         else:
             entries.append({"match": [q], "answer": answer, "learned": True, "facts": facts})
+        # Через временный файл: lookup из другого потока не прочитает файл наполовину (с обрезанным ответом).
         path = cfg.path(cfg.questions.faq_file)
-        path.write_text(HEADER + "\n" + yaml.safe_dump(entries, allow_unicode=True, sort_keys=False, width=100),
-                        encoding="utf-8")
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(HEADER + "\n" + yaml.safe_dump(entries, allow_unicode=True, sort_keys=False, width=100),
+                       encoding="utf-8")
+        os.replace(tmp, path)

@@ -281,19 +281,22 @@ def _snapshot(client, entity) -> list[tuple]:
 
 def _wait_bot(client, entity, timeout: float) -> bool:
     """Ждать, пока бот напишет или отредактирует сообщение (inline-кнопки часто правят сообщение
-    на месте), и ещё 5 с — бот обычно шлёт несколько сообщений подряд. False — бот молчит."""
+    на месте), и ещё 5 с — бот обычно шлёт несколько сообщений подряд. False — бот молчит.
+    Затишья ждём тоже не дольше timeout: бот может править сообщение без конца (таймер, «обрабатываю…»)."""
     before = _snapshot(client, entity)
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
         _idle(3)
         now = _snapshot(client, entity)
         if now != before:
-            while True:
+            t1 = time.monotonic()
+            while time.monotonic() - t1 < timeout:
                 _idle(5)
                 later = _snapshot(client, entity)
                 if later == now:
-                    return True
+                    break
                 now = later
+            return True
     return False
 
 
@@ -615,6 +618,8 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
         btns = _buttons(target)  # при висящем вопросе — его кнопки (например, оценка), а не кнопки списка
         if hanging is not None and step.action == "wait":
             step.action = "ignore"
+        if step.action == "reply" and not step.text.strip():  # пустое сообщение Telegram не примет
+            step.action, step.reason = "human", "модель не написала ответ"
         if step.action == "button":
             kind = _btn_kind(btns[step.button]) if 0 <= step.button < len(btns) else "bad"
             if kind in ("bad", "other", "geo") or (kind == "phone" and not t.share_contact):

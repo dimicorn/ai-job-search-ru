@@ -98,7 +98,7 @@ def _show(row, idx: int, total: int) -> None:
         + ("\n[red]Настораживает:[/]\n" + "\n".join(f"  • {r}" for r in flags) if flags else "")
         + ("\n[yellow]У работодателя тест — возможно, понадобится ручной ввод.[/]" if row["has_test"] else "")
         + (f"\n[yellow]Отложено: {row['error']}[/]" if row["status"] == "manual" and row["error"] else "")
-        + f"\n\n[bold]Письмо:[/]\n{row['cover_letter']}"
+        + f"\n\n[bold]Письмо:[/]\n{row['cover_letter'] or '— (нет: [e] — написать, [r] — сгенерировать)'}"
     )
     console.print(Panel(body, title=f"{idx}/{total}", expand=False))
 

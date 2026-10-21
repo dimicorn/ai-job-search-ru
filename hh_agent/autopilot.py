@@ -90,7 +90,7 @@ class Site:
         self.errors = 0
         if dry_run:
             secs, self.on_break = random.uniform(*cfg.browser.delay_seconds), False
-        elif self.done % au.break_every == 0:
+        elif au.break_every and self.done % au.break_every == 0:  # 0 — без длинных перерывов
             secs, self.on_break = _scaled(au.break_seconds, pace), True
         else:
             secs, self.on_break = _scaled(au.delay_seconds, pace), False
