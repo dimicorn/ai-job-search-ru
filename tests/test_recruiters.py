@@ -192,3 +192,34 @@ def test_old_greeting_does_not_override_just_chosen_vacancy(cfg, db, bot, monkey
     bot.add("Получил Ваш отклик на позицию Data Engineer.")  # новое приветствие — новый опрос, его видно
     assert r._current_survey(bot.messages, since=db.tg_survey_started(BOT, r._norm("Middle Data Scientist"))) \
         == "Data Engineer"
+
+
+def test_slow_bot_is_not_asked_to_switch_mid_survey(cfg, db, bot, monkeypatch):
+    """Бот думает над следующим вопросом дольше wait_reply_seconds — ждём, а не шлём /change_vacancy
+    посреди опроса (так оборвался опрос ГигаРекрутера: бот молчал 5 минут)."""
+    monkeypatch.setattr(r, "notify", lambda *a: None)
+    monkeypatch.setattr(r, "_human_pause", lambda *a: 0)
+    monkeypatch.setattr(r, "_decide", lambda *a, **k: _step("human"))
+    bot.add("Проводили ли вы эксперименты с архитектурами?", timedelta(minutes=4))
+    bot.add("Нет, не проводил.", timedelta(minutes=3), out=True)
+    calls = []
+
+    def wait_bot(*a, **k):
+        calls.append(1)
+        if len(calls) < 3:
+            return False  # бот молчит дольше wait_reply_seconds
+        bot.add("Какие разделы математики вы применяете?")
+        return True
+
+    monkeypatch.setattr(r, "_wait_bot", wait_bot)
+    assert _dialog(cfg, db, bot) == "human"
+    assert bot.sent == []
+
+
+def test_bot_silent_after_answer_for_long_gets_switch(cfg, db, bot, monkeypatch):
+    bot.add("Последний вопрос?", timedelta(minutes=30))
+    bot.add("Ответ.", r.BOT_THINKS + timedelta(minutes=1), out=True)
+    monkeypatch.setattr(r, "_wait_bot", lambda *a, **k: False)
+    bot.reply = lambda text: NO_MORE
+    assert _dialog(cfg, db, bot) == "done"
+    assert bot.sent == ["/change_vacancy"]

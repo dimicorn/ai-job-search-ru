@@ -50,6 +50,8 @@ _CHAT_JS = r"""() => {
 }"""
 
 STALE = timedelta(hours=2)  # бот не ответил на наше сообщение за это время — опрос считаем брошенным
+# Бот думает над следующим вопросом: ГигаРекрутер — и по 5 минут. Молчит дольше — опрос мог закончиться.
+BOT_THINKS = timedelta(minutes=15)
 
 
 class Step(BaseModel):
@@ -89,7 +91,12 @@ SYSTEM = """Ты проходишь за соискателя опрос AI-ре
 
 {style}
 
-Не повод для human: отсутствие опыта с чем-то (ответь через близкий опыт), вопросы на знания,
+Это один разговор: перечитай мои ответы выше. Самый близкий к вопросу проект можно назвать снова,
+но не пересказывай уже сказанное и не повторяй те же цифры — говори о той стороне, о которой
+спрашивают сейчас; другой подходящий пример из резюме лучше повтора. Начала ответов не делай однотипными. На вопрос об опыте —
+2–4 предложения, даже если тема большая: это разговор, а не лекция.
+
+Не повод для human: отсутствие опыта с чем-то (так и ответь), вопросы на знания,
 стаж (посчитай по датам в резюме), мотивация и интерес к задачам (выводи из резюме и пожеланий).
 Зарплату, сроки выхода, гражданство, город и т.п. бери только из фактов — не выдумывай.
 Никогда не упоминай «резюме», «факты», ИИ и что отвечаешь не сам.
@@ -300,6 +307,15 @@ def _wait_bot(client, entity, timeout: float) -> bool:
     return False
 
 
+def _wait_reply(client, entity, last, timeout: float) -> bool:
+    """Ждать ответа бота на наше сообщение last, пока с него не прошло BOT_THINKS. False — бот молчит."""
+    while True:
+        if _wait_bot(client, entity, timeout):
+            return True
+        if datetime.now(UTC) - last.date >= BOT_THINKS:
+            return False
+
+
 def _vacancy_context(cfg: Config, db: DB, vid: int | None, survey: str | None) -> str:
     from .analyst import _vacancy_prompt
     row = db.get(vid) if vid else None
@@ -506,9 +522,9 @@ def _dialog(cfg: Config, db: DB, client, bot: str, entity, dry_run: bool) -> str
         state = db.tg_dialog(bot)
         if last.out:  # ждём бота
             fresh = datetime.now(UTC) - last.date <= STALE
-            if fresh and not dry_run and _wait_bot(client, entity, t.wait_reply_seconds):
+            if fresh and not dry_run and _wait_reply(client, entity, last, t.wait_reply_seconds):
                 continue
-            # Бот молчит после нашего сообщения: опрос мог закончиться без его ответа — идём дальше.
+            # Бот молчит после нашего сообщения дольше BOT_THINKS: опрос мог закончиться без его ответа.
             # Команду «сменить вакансию» второй раз подряд не шлём.
             if (not (last.message or "").startswith("/") and not (state and state["status"] == "human")
                     and switch(force=True)):
