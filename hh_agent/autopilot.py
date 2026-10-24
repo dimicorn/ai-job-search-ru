@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta
 
 from . import analyst as analyst_mod
-from . import recruiters, stop
+from . import channels, recruiters, stop
 from .applier import Applier, Mode
 from .browser import SITES, CaptchaError, SiteTabs, attach, free_port, is_logged_in, open_browser, source_of
 from .config import Config
@@ -308,11 +308,20 @@ def _produce(cfg: Config, run: Run, cdp_port: int) -> None:
 
 
 def _telegram(cfg: Config, dry_run: bool, cdp_port: int, others: list[threading.Thread]) -> None:
-    """Опросы AI-рекрутеров; заново — когда появились новые отклики в их компании, и в конце."""
+    """Опросы AI-рекрутеров — заново, когда появились новые отклики в их компании, и в конце;
+    каналы с вакансиями — раз в telegram.channels_every_minutes."""
     db = DB(cfg.path(cfg.db_path))
-    seen = None
+    seen = read_at = None
     while not stop.requested():
         alive = any(t.is_alive() for t in others)
+        if cfg.telegram.channels and (read_at is None
+                                      or time.monotonic() - read_at >= cfg.telegram.channels_every_minutes * 60):
+            read_at = time.monotonic()
+            try:
+                channels.run(cfg, db)
+            except Exception as e:
+                if not stop.requested():
+                    _log(f"[red]Telegram-каналы: {e}[/]")
         applies = len(recruiters._company_applies(cfg, db))
         if applies != seen:
             seen = applies

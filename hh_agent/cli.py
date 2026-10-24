@@ -7,14 +7,14 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from rich.panel import Panel
 from rich.table import Table
 
 from . import analyst as analyst_mod
-from . import recruiters, stop
+from . import channels, recruiters, stop
 from .applier import apply_one
 from .autopilot import run_auto
 from .browser import LOGIN_URL, SITES, SiteTabs, is_logged_in, open_browser, pause, source_of
@@ -314,6 +314,21 @@ def cmd_list(cfg: Config, db: DB, status: str) -> None:
     console.print(t)
 
 
+def cmd_channels(cfg: Config, db: DB, days: int, read: bool) -> None:
+    if not (cfg.telegram.enabled and cfg.telegram.channels):
+        raise SystemExit("Задайте telegram.channels и включите telegram.enabled в config.yaml.")
+    if read:
+        channels.run(cfg, db)
+    since = (datetime.now() - timedelta(days=days)).isoformat()
+    posts = db.tg_posts("vacancy", since)
+    t = Table("балл", "вакансия", "компания", "опубликовано", title=f"Подходящие вакансии в каналах за {days} дн.")
+    t.add_column("ссылка", no_wrap=True)  # перенос ломает ссылку — её не открыть кликом
+    for r in posts:
+        t.add_row(str(r["score"]), r["title"] or "—", r["company"] or "—", (r["posted_at"] or "")[:16].replace("T", " "),
+                  r["link"])
+    console.print(t if posts else f"Подходящих вакансий в каналах за {days} дн. нет.")
+
+
 def _keep_awake() -> None:
     """Не давать Mac засыпать от бездействия, пока идёт запуск (закрытую крышку это не отменяет).
     caffeinate сам завершится вместе с этим процессом (-w)."""
@@ -376,6 +391,9 @@ def main() -> None:
     rc.add_argument("--dry-run", action="store_true", help="показать, что агент ответил бы, ничего не отправляя")
     rp = sub.add_parser("report", help="сводка и рекомендации по журналу событий за N дней (через LLM)")
     rp.add_argument("--days", type=int, default=7)
+    ch = sub.add_parser("channels", help="вакансии из Telegram-каналов (telegram.channels): проверить и показать ссылки")
+    ch.add_argument("--days", type=int, default=7, help="показать посты за столько дней")
+    ch.add_argument("--no-scan", action="store_true", help="только показать сохранённые, каналы не читать")
     sub.add_parser("stats", help="статистика за сегодня, 7 и 30 дней")
     ls = sub.add_parser("list", help="список вакансий по статусу")
     ls.add_argument("status", choices=["new", "filtered", "scored", "skipped", "applied", "unconfirmed", "manual", "error"])
@@ -411,7 +429,7 @@ def _dispatch(a: argparse.Namespace) -> None:
             f"Команда {a.cmd} интерактивная: запустите её в обычном окне терминала "
             "(не через `!` в Claude Code и не из cron)."
         )
-    if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot", "recruiters"):
+    if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot", "recruiters", "channels"):
         _keep_awake()
     cfg = load_config(a.config)
     db = DB(cfg.path(cfg.db_path))
@@ -448,6 +466,8 @@ def _dispatch(a: argparse.Namespace) -> None:
         if not cfg.telegram.enabled:
             raise SystemExit("Включите telegram.enabled в config.yaml.")
         recruiters.run(cfg, db, dry_run=a.dry_run)
+    elif a.cmd == "channels":
+        cmd_channels(cfg, db, a.days, read=not a.no_scan)
     elif a.cmd == "stats":
         cmd_stats(cfg, db)
     elif a.cmd == "list":

@@ -59,6 +59,26 @@ CREATE TABLE IF NOT EXISTS tg_dialogs (
     survey       TEXT,   -- название вакансии текущего опроса
     switched_at  TEXT    -- когда агент последний раз просил бота сменить вакансию
 );
+-- Посты Telegram-каналов с вакансиями: vacancy (балл ≥ min_score) | low | filtered (стоп-слово) | other (не вакансия)
+CREATE TABLE IF NOT EXISTS tg_posts (
+    channel   TEXT,
+    msg_id    INTEGER,
+    posted_at TEXT,
+    link      TEXT,
+    title     TEXT,
+    company   TEXT,
+    score     INTEGER,
+    reasons   TEXT,
+    status    TEXT,
+    text      TEXT,
+    found_at  TEXT,
+    PRIMARY KEY (channel, msg_id)
+);
+-- Последний разобранный пост канала
+CREATE TABLE IF NOT EXISTS tg_channels (
+    channel TEXT PRIMARY KEY,
+    last_id INTEGER
+);
 -- Опросы по вакансиям у бота, у которого одна переписка на все вакансии: active | human | done
 CREATE TABLE IF NOT EXISTS tg_surveys (
     bot         TEXT,
@@ -201,6 +221,29 @@ class DB:
         return self.conn.execute(
             "SELECT status, COUNT(*) FROM vacancies GROUP BY status ORDER BY 2 DESC"
         ).fetchall()
+
+    def tg_channel_cursor(self, channel: str) -> int:
+        r = self.conn.execute("SELECT last_id FROM tg_channels WHERE channel=?", (channel,)).fetchone()
+        return r[0] if r else 0
+
+    def set_tg_channel_cursor(self, channel: str, last_id: int) -> None:
+        self.conn.execute("INSERT INTO tg_channels (channel, last_id) VALUES (?, ?) "
+                          "ON CONFLICT(channel) DO UPDATE SET last_id=excluded.last_id", (channel, last_id))
+        self.conn.commit()
+
+    def tg_post(self, channel: str, msg_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM tg_posts WHERE channel=? AND msg_id=?", (channel, msg_id)).fetchone()
+
+    def save_tg_post(self, channel: str, msg_id: int, **fields: Any) -> None:
+        cols = ", ".join(["channel", "msg_id", *fields])
+        marks = ", ".join("?" * (len(fields) + 2))
+        self.conn.execute(f"INSERT OR REPLACE INTO tg_posts ({cols}) VALUES ({marks})", (channel, msg_id, *fields.values()))
+        self.conn.commit()
+
+    def tg_posts(self, status: str, since: str) -> list[sqlite3.Row]:
+        """Посты со статусом status, опубликованные не раньше since, — лучшие и свежие сверху."""
+        return self.conn.execute("SELECT * FROM tg_posts WHERE status=? AND posted_at >= ? "
+                                 "ORDER BY score DESC, posted_at DESC", (status, since)).fetchall()
 
 
 def _enc(v: Any) -> Any:

@@ -145,6 +145,10 @@ telegram:
   max_reply_seconds: 240            #   но не дольше
   share_contact: false              # true — на кнопку «поделиться номером» отдавать свой телефон
   accept_consent: true              # принимать согласие на обработку персональных данных для подбора
+  channels: []                      # каналы с вакансиями (@username или t.me/…): подходящие посты —
+                                    #   ссылкой в uv run hh-agent channels; autopilot проверяет их
+  channels_days: 3                  # первое чтение канала — посты за столько дней
+  channels_every_minutes: 30        # как часто autopilot проверяет каналы
 
 browser:
   profile_dir: .browser-profile      # здесь хранится ваша сессия hh.ru

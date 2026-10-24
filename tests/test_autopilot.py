@@ -161,3 +161,13 @@ def test_autopilot_applies_to_vacancies_found_during_the_run(auto, db, monkeypat
     monkeypatch.setattr(autopilot.analyst_mod, "analyze_new", fake_analyze)
     autopilot.run_auto(auto, db, produce=True)
     assert FakeApplier.calls == [7] and db.get(7)["status"] == "applied"
+
+
+def test_telegram_thread_reads_channels(auto, db, monkeypatch):
+    auto.telegram.enabled, auto.telegram.channels = True, ["@ml_jobs"]
+    reads = []
+    monkeypatch.setattr(autopilot.recruiters, "run", lambda *a, **k: None)
+    monkeypatch.setattr(autopilot.channels, "run", lambda cfg, db_: reads.append(1))
+    _vacancy(db, 1)
+    autopilot.run_auto(auto, db)
+    assert reads == [1] and FakeApplier.calls == [1]  # раз в channels_every_minutes: за короткий запуск — один
