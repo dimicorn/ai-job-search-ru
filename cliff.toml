@@ -24,6 +24,7 @@ output = "CHANGELOG.md"
 conventional_commits = true
 filter_unconventional = true
 commit_parsers = [
+  { message = "^chore\\(release\\)", skip = true },
   { message = "^feat", group = "<!-- 0 -->🚀 Features" },
   { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
   { message = "^doc", group = "<!-- 3 -->📚 Documentation" },

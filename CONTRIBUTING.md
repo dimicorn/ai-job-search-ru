@@ -39,13 +39,21 @@
 Версию пакета задаёт git-тег (hatch-vcs): на теге `v0.2.0` это `0.2.0`, после него —
 `0.2.1.devN+g<коммит>`; в `pyproject.toml` её править не нужно, текущая — `uv run hh-agent --version`.
 
-CHANGELOG.md собирает git-cliff по `cliff.toml` из истории коммитов. При push тега вида `v0.2.0`
-workflow `.github/workflows/changelog.yml` обновляет файл и сам коммитит его в `main`
-(после этого сделайте `git pull`):
+`main` защищён: изменения попадают в него только через PR, в котором прошли проверки CI
+(Ruff и тесты на Ubuntu и macOS). PR сливается squash-коммитом, и его заголовок становится
+сообщением коммита, поэтому заголовок PR тоже пишется по Conventional Commits.
+
+CHANGELOG.md собирает git-cliff по `cliff.toml` из истории коммитов. Релиз — тоже через PR:
 
 ```bash
+git switch -c release/v0.2.0
+uvx git-cliff --tag v0.2.0 -o CHANGELOG.md
+git commit -am "chore(release): v0.2.0" && git push -u origin release/v0.2.0
+gh pr create --fill
+# после слияния PR:
+git switch main && git pull
 git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0
 ```
 
-Посмотреть заранее: `uvx git-cliff --offline --unreleased` (`--offline` — без запросов к GitHub API,
-которому для приватного репозитория нужен токен).
+На push тега workflow `.github/workflows/release.yml` публикует GitHub Release с разделом
+этой версии из CHANGELOG. Посмотреть заранее, что попадёт в релиз: `uvx git-cliff --unreleased -o -` (без `-o -` git-cliff перезапишет CHANGELOG.md).
