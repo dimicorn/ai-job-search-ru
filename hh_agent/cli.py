@@ -54,6 +54,22 @@ def cmd_resume(cfg: Config, force: bool) -> None:
                   "по нему LLM оценивает вакансии и пишет письма.")
 
 
+def cmd_raise(cfg: Config) -> None:
+    """Поднять резюме в поиске hh.ru (hh разрешает раз в 4 часа); autopilot делает это сам."""
+    from . import resume
+
+    with open_browser(cfg, headless=cfg.browser.headless_scan) as (_, page):
+        try:
+            raised, nxt = resume.raise_all(page)
+        except RuntimeError as e:
+            raise SystemExit(str(e)) from None
+    when = f" Следующее — после {nxt:%d.%m %H:%M}." if nxt else ""
+    if raised:
+        console.print(f"[green]Поднял в поиске: {', '.join(f'«{t}»' for t in raised)}.[/]{when}")
+    else:
+        console.print(f"Поднимать пока нечего.{when or ' Видимых работодателям резюме нет.'}")
+
+
 def cmd_login(cfg: Config, db: DB) -> None:
     """Вход на каждый сайт из searches (hh.ru, Хабр Карьера); сессии хранятся в профиле браузера."""
     with open_browser(cfg) as (ctx, first):
@@ -371,6 +387,7 @@ def main() -> None:
     dr.add_argument("--online", action="store_true", help="ещё вход на сайты и в Telegram и тестовый запрос к LLM")
     rs = sub.add_parser("resume", help="скачать резюме с hh.ru в resume.md (без ФИО и контактов)")
     rs.add_argument("--force", action="store_true", help="перезаписать заполненный resume.md (старый — в .bak)")
+    sub.add_parser("raise", help="поднять резюме в поиске hh.ru (можно раз в 4 часа; autopilot делает это сам)")
     s = sub.add_parser("scan", help="найти вакансии по фильтрам и оценить их")
     s.add_argument("--no-analyze", action="store_true")
     sub.add_parser("analyze", help="оценить ещё не оценённые вакансии")
@@ -437,6 +454,8 @@ def _dispatch(a: argparse.Namespace) -> None:
         cmd_login(cfg, db)
     elif a.cmd == "resume":
         cmd_resume(cfg, a.force)
+    elif a.cmd == "raise":
+        cmd_raise(cfg)
     elif a.cmd == "scan":
         cmd_scan(cfg, db, analyze=not a.no_analyze)
     elif a.cmd == "analyze":

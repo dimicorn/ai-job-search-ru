@@ -83,6 +83,7 @@ class Apply(BaseModel):
     submit_mode: str = "auto"
     # Название резюме, если их несколько (иначе hh подставит последнее использованное).
     resume_title: str | None = None
+    raise_resume: bool = True  # autopilot поднимает резюме в поиске hh.ru, когда можно (раз в 4 часа)
     delay_seconds: tuple[float, float] = (4, 9)  # пауза после отклика в review
     auto: AutoApply = Field(default_factory=AutoApply)
 

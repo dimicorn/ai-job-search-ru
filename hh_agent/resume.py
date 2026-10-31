@@ -1,4 +1,6 @@
-"""Резюме с hh.ru → resume.md (hh-agent resume): агент уже вошёл на hh в своём профиле браузера,
+"""Резюме на hh.ru: выгрузка в resume.md и поднятие в поиске.
+
+Выгрузка (hh-agent resume): агент уже вошёл на hh в своём профиле браузера,
 поэтому берёт выгрузку резюме («Скачать → TXT», это HTML-документ) и делает из неё Markdown.
 
 ФИО, дата рождения, телефон, почта и мессенджеры в resume.md не попадают: файл уходит в LLM
@@ -9,11 +11,13 @@ from __future__ import annotations
 
 import html as html_mod
 import re
+import time
+from datetime import datetime
 from typing import Any
 
 from playwright.sync_api import Page
 
-from .browser import HH, check_captcha, page_state
+from .browser import HH, check_captcha, page_state, pause
 from .scout import html_to_text
 
 # Разделы выгрузки hh: <p class="resume__block">Опыт работы — 3 года 2 месяца</p>
@@ -108,3 +112,57 @@ def fetch(page: Page, title: str | None = None) -> tuple[str, str]:
         raise SystemExit(f"Выгрузка резюме: HTTP {res.status} — скопируйте текст резюме в resume.md вручную.")
     md = to_markdown(res.text())
     return md.splitlines()[0].lstrip("# ").strip(), md  # название — из заголовка резюме
+
+
+# ── поднятие в поиске (hh-agent raise, autopilot) ─────────────────────
+MY_RESUMES = f"{HH}/applicant/my_resumes"
+_RAISE_BTN = "[data-qa~='resume-update-button']"  # data-qa="resume-update-button resume-update-button_actions"
+CLICK_WAIT_MS = 3000  # после нажатия: hh отправляет запрос и показывает окно «Готово»
+
+
+def _title(r: dict[str, Any]) -> str:
+    return ((r.get("title") or [{}])[0].get("string") or r["_attributes"]["hash"]).strip()
+
+
+def raisable(state: dict[str, Any], now_ms: float) -> list[tuple[str, str]]:
+    """(хеш, название) резюме, которые hh уже разрешает поднять. До nextTouchAt (4 часа после поднятия)
+    у резюме canTouch: false, у скрытого от работодателей — всегда."""
+    return [(r["_attributes"]["hash"], _title(r)) for r in state.get("applicantResumes") or []
+            if r.get("_attributes", {}).get("canTouch") and (r["_attributes"].get("nextTouchAt") or 0) <= now_ms]
+
+
+def next_raise(state: dict[str, Any], now_ms: float) -> datetime | None:
+    """Когда ближайшее резюме снова можно будет поднять (у скрытых nextTouchAt нет)."""
+    at = [t for r in state.get("applicantResumes") or []
+          if (t := (r.get("_attributes") or {}).get("nextTouchAt") or 0) > now_ms]
+    return datetime.fromtimestamp(min(at) / 1000) if at else None
+
+
+def raise_all(page: Page) -> tuple[list[str], datetime | None]:
+    """Поднять в поиске все резюме, которые уже можно. (поднятые, когда можно снова).
+    Поднятие проверяется по странице после перезагрузки: у резюме сдвинулся nextTouchAt."""
+    page.goto(MY_RESUMES, wait_until="domcontentloaded")
+    check_captcha(page)
+    st: dict[str, Any] = page_state(page) or {}
+    if st.get("userType") != "applicant":
+        raise RuntimeError("нет входа на hh.ru — выполните uv run hh-agent login")
+    due = raisable(st, time.time() * 1000)
+    for h, _ in due:
+        # Карточка резюме — ближайший предок ссылки на него, в котором есть кнопка «Поднять в поиске».
+        card = page.locator(f"a[href^='/resume/{h}']").first.locator(
+            "xpath=ancestor::*[.//*[contains(concat(' ', normalize-space(@data-qa), ' '),"
+            " ' resume-update-button ')]][1]")
+        pause((1, 3))
+        card.locator(_RAISE_BTN).first.click()
+        page.wait_for_timeout(CLICK_WAIT_MS)
+        page.keyboard.press("Escape")  # окно «Поднимать за вас?» — это платная услуга, закрываем
+    if not due:
+        return [], next_raise(st, time.time() * 1000)
+    page.goto(MY_RESUMES, wait_until="domcontentloaded")
+    st = page_state(page) or {}
+    now = time.time() * 1000
+    left = {h for h, _ in raisable(st, now)}
+    raised = [t for h, t in due if h not in left]
+    if len(raised) < len(due):
+        raise RuntimeError("hh.ru не поднял резюме: " + ", ".join(f"«{t}»" for h, t in due if h in left))
+    return raised, next_raise(st, now)

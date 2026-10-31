@@ -5,7 +5,8 @@
                  (только autopilot): новые вакансии сразу попадают в очередь откликов;
   hh.ru, Хабр  — отклики, у каждого сайта свои паузы и счётчик ошибок; вакансии берутся из базы
                  по одной, пока поиск-оценка ещё идёт — ждут новых;
-  Telegram     — опросы AI-рекрутеров; повторяется, когда появляются новые отклики в их компании.
+  Telegram     — опросы AI-рекрутеров; повторяется, когда появляются новые отклики в их компании;
+  поднятие     — резюме в поиске hh.ru, если с прошлого раза прошло 4 часа (apply.raise_resume).
 Дневной лимит и лимит запуска общие для сайтов. Ctrl+C или SIGTERM — остановка с итогом (stop.py).
 """
 from __future__ import annotations
@@ -16,7 +17,7 @@ import time
 from datetime import datetime, timedelta
 
 from . import analyst as analyst_mod
-from . import channels, recruiters, stop
+from . import channels, recruiters, resume, stop
 from .applier import Applier, Mode
 from .browser import SITES, CaptchaError, SiteTabs, attach, free_port, is_logged_in, open_browser, source_of
 from .config import Config
@@ -273,6 +274,21 @@ def _scan_worker(cfg: Config, src: str, cdp_port: int, found: list[int]) -> None
         found.append(scan(cfg, db, page, {src}))
 
 
+def _raise_worker(cfg: Config, cdp_port: int) -> None:
+    """Поднять резюме в поиске hh.ru, если уже можно (раз в 4 часа)."""
+    with attach(cdp_port) as (_, page):
+        try:
+            raised, nxt = resume.raise_all(page)
+        except RuntimeError as e:
+            _log(f"[yellow]Поднятие резюме: {e}[/]")
+            return
+    if raised:
+        log_event(cfg, "resume_raised", titles=raised)
+        _log(f"[green]↑ резюме поднято в поиске[/]: {', '.join(raised)}")
+    elif nxt:
+        _log(f"[dim]резюме поднимать рано — можно после {nxt:%H:%M}[/]")
+
+
 def _section(thread: str, sites: list[str]) -> str | None:
     """Блок вывода по имени потока: поиск и отклики сайта — в блок сайта, Telegram — в свой,
     оценка (общая для сайтов, её потоки LLM_*) — в первый блок."""
@@ -384,6 +400,8 @@ def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: 
                     threads.append(_thread(_apply_worker, cfg, run, src, mode, pace, port, name=SITES[src]))
                 else:
                     _log(f"[yellow]Нет входа на {SITES[src]} — там не откликаюсь.[/] Выполните: uv run hh-agent login")
+        if cfg.apply.raise_resume and "hh" in cfg.sources() and not dry_run:
+            threads.append(_thread(_raise_worker, cfg, port, name=f"поднятие {SITES['hh']}"))
         workers = list(threads)
         if cfg.telegram.enabled:
             threads.append(_thread(_telegram, cfg, dry_run, port, workers, name="Telegram"))
