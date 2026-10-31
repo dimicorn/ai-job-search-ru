@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.1.6] - 2026-10-31
+
+### 🚀 Features
+
+- *(resume)* Raise resume in hh.ru search
+- *(channels)* Find vacancies in Telegram channels
+- Count discovered applies in the daily limit
+- *(scan)* Mark known vacancies applied when the site shows a response
+- Stop gracefully on Ctrl+C and SIGTERM
+
+### 🐛 Bug Fixes
+
+- *(recruiters)* Answer the question asked and wait for a slow bot
+- FAQ answering the wrong question, captcha false positive and more
+- Telegram wait hang, torn faq.yaml reads and other bugs
+- False Codex errors, silent thread deaths and other bugs found in review
+- *(applier)* Open relative Habr external-response links
+
+### 📚 Documentation
+
+- Rename repo to ai-job-search-ru and add star history chart
+
+### 🧪 Testing
+
+- Add apply-flow, autopilot and CLI smoke tests
+
 ## [0.1.5] - 2026-10-20
 
 ### 🚀 Features
