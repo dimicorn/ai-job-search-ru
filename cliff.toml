@@ -40,4 +40,4 @@ sort_commits = "newest"
 
 [remote.github]
 owner = "dimicorn"
-repo = "job_search_agent"
+repo = "ai-job-search-ru"

@@ -33,7 +33,7 @@
 - Python, браузер для агента и остальное `setup.sh` поставит сам.
 
 ```bash
-git clone https://github.com/dimicorn/job_search_agent.git hh-agent && cd hh-agent
+git clone https://github.com/dimicorn/ai-job-search-ru.git hh-agent && cd hh-agent
 ./setup.sh
 ```
 
@@ -92,6 +92,16 @@ uv run hh-agent list manual   # что требует ручного откли�
 ## Разработка
 
 Линтер, тесты, CI, стиль коммитов и релизы — в [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## История звёзд
+
+<a href="https://www.star-history.com/#dimicorn/ai-job-search-ru&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=dimicorn/ai-job-search-ru&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=dimicorn/ai-job-search-ru&type=Date" />
+    <img alt="График звёзд на GitHub" src="https://api.star-history.com/svg?repos=dimicorn/ai-job-search-ru&type=Date" />
+  </picture>
+</a>
 
 ## Лицензия
 

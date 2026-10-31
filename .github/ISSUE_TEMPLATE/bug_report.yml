@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Сначала загляните в [«Если сломалось»](https://github.com/dimicorn/job_search_agent/blob/main/docs/troubleshooting.md) — частые случаи там.
+        Сначала загляните в [«Если сломалось»](https://github.com/dimicorn/ai-job-search-ru/blob/main/docs/troubleshooting.md) — частые случаи там.
         **Не вставляйте личные данные:** тексты писем и ответов работодателям, резюме, контакты, ключи API.
   - type: textarea
     id: what
