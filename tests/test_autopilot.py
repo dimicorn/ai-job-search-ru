@@ -167,7 +167,18 @@ def test_telegram_thread_reads_channels(auto, db, monkeypatch):
     auto.telegram.enabled, auto.telegram.channels = True, ["@ml_jobs"]
     reads = []
     monkeypatch.setattr(autopilot.recruiters, "run", lambda *a, **k: None)
-    monkeypatch.setattr(autopilot.channels, "run", lambda cfg, db_: reads.append(1))
+    monkeypatch.setattr(autopilot.channels, "run", lambda cfg, db_, **kw: reads.append(kw))
     _vacancy(db, 1)
     autopilot.run_auto(auto, db)
-    assert reads == [1] and FakeApplier.calls == [1]  # раз в channels_every_minutes: за короткий запуск — один
+    # раз в channels_every_minutes: за короткий запуск — один; в рабочие часы — с откликами кнопкой в ботах
+    assert reads == [{"apply": "auto", "dry_run": False}] and FakeApplier.calls == [1]
+
+
+def test_telegram_thread_does_not_press_buttons_off_hours(auto, db, monkeypatch):
+    auto.telegram.enabled, auto.telegram.channels = True, ["@ml_jobs"]
+    auto.apply.auto.active_hours = (0, 0)  # рабочих часов нет
+    reads = []
+    monkeypatch.setattr(autopilot.recruiters, "run", lambda *a, **k: None)
+    monkeypatch.setattr(autopilot.channels, "run", lambda cfg, db_, **kw: reads.append(kw))
+    autopilot.run_auto(auto, db)
+    assert reads == [{"apply": None, "dry_run": False}]  # каналы читаем, но кнопку не жмём

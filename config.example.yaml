@@ -147,7 +147,9 @@ telegram:
   share_contact: false              # true — на кнопку «поделиться номером» отдавать свой телефон
   accept_consent: true              # принимать согласие на обработку персональных данных для подбора
   channels: []                      # каналы с вакансиями (@username или t.me/…): подходящие посты —
-                                    #   ссылкой в uv run hh-agent channels; autopilot проверяет их
+                                    #   ссылкой в uv run hh-agent channels; autopilot проверяет их.
+                                    #   Бот вакансий (getmatch: @g_jobbot) — тоже сюда: кнопку
+                                    #   «Откликнуться» под постом агент нажимает сам (docs/telegram.md)
   channels_days: 3                  # первое чтение канала — посты за столько дней
   channels_every_minutes: 30        # как часто autopilot проверяет каналы
 

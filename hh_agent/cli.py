@@ -154,6 +154,7 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
         console.print(f"Нет оценённых вакансий с баллом ≥ {threshold}. Запустите [bold]hh-agent scan[/].")
         return
     console.print(f"К просмотру: {len(rows)}. Сегодня уже откликов: {db.applied_today()}/{cfg.apply.daily_limit}")
+    _tg_hint(cfg, db)
     keys = "[y] откликнуться  [e] править письмо  [r] переписать с указанием  [o] открыть  [s] пропустить  [l] позже  [q] выход"
     analyst = None
     with open_browser(cfg) as (ctx, first):
@@ -221,6 +222,16 @@ def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool =
                     console.print(f"[{color}]{status}[/] {note or ''}")
                     pause(cfg.apply.delay_seconds)
                     break
+
+
+def _tg_hint(cfg: Config, db: DB) -> None:
+    """Вакансии из ботов в Telegram с кнопкой отклика — в review их не видно, напомнить о channels --apply."""
+    if not (cfg.telegram.enabled and cfg.telegram.channels):
+        return
+    since = (datetime.now() - timedelta(days=channels.APPLY_DAYS)).isoformat()
+    n = sum(1 for r in db.tg_to_apply(cfg.analyst.min_score, since) if r["status"] == "vacancy" and r["apply_data"])
+    if n:
+        console.print(f"В Telegram ждут отклика кнопкой в боте: {n} — uv run hh-agent channels --apply")
 
 
 def cmd_requeue(cfg: Config, db: DB, include_tests: bool) -> None:
@@ -330,19 +341,27 @@ def cmd_list(cfg: Config, db: DB, status: str) -> None:
     console.print(t)
 
 
-def cmd_channels(cfg: Config, db: DB, days: int, read: bool) -> None:
+_TG_APPLY = {"applied": "[green]отправлен[/]", "unconfirmed": "[red]не подтверждён[/]", "human": "[yellow]бот ждёт вас[/]"}
+
+
+def cmd_channels(cfg: Config, db: DB, days: int, read: bool, apply: bool = False, dry_run: bool = False) -> None:
     if not (cfg.telegram.enabled and cfg.telegram.channels):
         raise SystemExit("Задайте telegram.channels и включите telegram.enabled в config.yaml.")
-    if read:
-        channels.run(cfg, db)
+    if read or apply:
+        channels.run(cfg, db, read=read, apply="ask" if apply else None, dry_run=dry_run)
     since = (datetime.now() - timedelta(days=days)).isoformat()
-    posts = db.tg_posts("vacancy", since)
-    t = Table("балл", "вакансия", "компания", "опубликовано", title=f"Подходящие вакансии в каналах за {days} дн.")
+    posts = sorted((r for st in ("vacancy", *_TG_APPLY) for r in db.tg_posts(st, since)),
+                   key=lambda r: (-(r["score"] or 0), r["posted_at"] or ""))
+    t = Table("балл", "вакансия", "компания", "опубликовано", "отклик", title=f"Подходящие вакансии в каналах за {days} дн.")
     t.add_column("ссылка", no_wrap=True)  # перенос ломает ссылку — её не открыть кликом
     for r in posts:
+        state = _TG_APPLY.get(r["status"]) or ("кнопка в боте" if r["apply_data"] else "—")
         t.add_row(str(r["score"]), r["title"] or "—", r["company"] or "—", (r["posted_at"] or "")[:16].replace("T", " "),
-                  r["link"])
+                  state, r["link"])
     console.print(t if posts else f"Подходящих вакансий в каналах за {days} дн. нет.")
+    if not apply and any(r["status"] == "vacancy" and r["apply_data"] for r in posts):
+        console.print("Откликнуться кнопкой в боте: [bold]uv run hh-agent channels --apply[/] "
+                      "(autopilot и auto откликаются сами)")
 
 
 def _keep_awake() -> None:
@@ -411,6 +430,9 @@ def main() -> None:
     ch = sub.add_parser("channels", help="вакансии из Telegram-каналов (telegram.channels): проверить и показать ссылки")
     ch.add_argument("--days", type=int, default=7, help="показать посты за столько дней")
     ch.add_argument("--no-scan", action="store_true", help="только показать сохранённые, каналы не читать")
+    ch.add_argument("--apply", action="store_true", help="откликнуться кнопкой «Откликнуться» под постами ботов вакансий, "
+                                                          "спрашивая по каждой")
+    ch.add_argument("--dry-run", action="store_true", help="с --apply: показать, что нажал бы, ничего не нажимая")
     sub.add_parser("stats", help="статистика за сегодня, 7 и 30 дней")
     ls = sub.add_parser("list", help="список вакансий по статусу")
     ls.add_argument("status", choices=["new", "filtered", "scored", "skipped", "applied", "unconfirmed", "manual", "error"])
@@ -441,9 +463,9 @@ def _dispatch(a: argparse.Namespace) -> None:
         from .wizard import setup
         setup(config_path)
         return
-    if a.cmd in ("login", "review", "run") and not sys.stdin.isatty():
+    if (a.cmd in ("login", "review", "run") or (a.cmd == "channels" and a.apply)) and not sys.stdin.isatty():
         raise SystemExit(
-            f"Команда {a.cmd} интерактивная: запустите её в обычном окне терминала "
+            f"Команда {a.cmd}{' --apply' if a.cmd == 'channels' else ''} интерактивная: запустите её в обычном окне терминала "
             "(не через `!` в Claude Code и не из cron)."
         )
     if a.cmd in ("scan", "analyze", "letters", "review", "run", "auto", "autopilot", "recruiters", "channels"):
@@ -486,7 +508,7 @@ def _dispatch(a: argparse.Namespace) -> None:
             raise SystemExit("Включите telegram.enabled в config.yaml.")
         recruiters.run(cfg, db, dry_run=a.dry_run)
     elif a.cmd == "channels":
-        cmd_channels(cfg, db, a.days, read=not a.no_scan)
+        cmd_channels(cfg, db, a.days, read=not a.no_scan, apply=a.apply, dry_run=a.dry_run)
     elif a.cmd == "stats":
         cmd_stats(cfg, db)
     elif a.cmd == "list":
