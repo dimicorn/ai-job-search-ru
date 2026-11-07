@@ -6,6 +6,7 @@
   hh.ru, Хабр  — отклики, у каждого сайта свои паузы и счётчик ошибок; вакансии берутся из базы
                  по одной, пока поиск-оценка ещё идёт — ждут новых;
   Telegram     — опросы AI-рекрутеров; повторяется, когда появляются новые отклики в их компании;
+                 каналы с вакансиями и отклики кнопкой под постами ботов вакансий (channels.py);
   поднятие     — резюме в поиске hh.ru, если с прошлого раза прошло 4 часа (apply.raise_resume).
 Дневной лимит и лимит запуска общие для сайтов. Ctrl+C или SIGTERM — остановка с итогом (stop.py).
 """
@@ -333,8 +334,8 @@ def _telegram(cfg: Config, dry_run: bool, cdp_port: int, others: list[threading.
         if cfg.telegram.channels and (read_at is None
                                       or time.monotonic() - read_at >= cfg.telegram.channels_every_minutes * 60):
             read_at = time.monotonic()
-            try:
-                channels.run(cfg, db)
+            try:  # кнопкой «Откликнуться» под постами ботов вакансий — только в рабочие часы, как на сайтах
+                channels.run(cfg, db, apply="auto" if dry_run or _in_window(cfg) else None, dry_run=dry_run)
             except Exception as e:
                 if not stop.requested():
                     _log(f"[red]Telegram-каналы: {e}[/]")

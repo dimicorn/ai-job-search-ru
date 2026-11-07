@@ -118,7 +118,8 @@ class Telegram(BaseModel):
     wait_reply_seconds: int = 120             # сколько ждать следующего сообщения бота
     share_contact: bool = False               # true — на просьбу «поделиться контактом» отдавать свой номер
     accept_consent: bool = True               # принимать согласие на обработку персональных данных для подбора
-    # Каналы с вакансиями: подходящие посты сохраняются ссылкой (uv run hh-agent channels).
+    # Каналы с вакансиями: подходящие посты сохраняются ссылкой (uv run hh-agent channels). Бот вакансий
+    # (getmatch) — тоже сюда: кнопку «Откликнуться» под постом агент нажимает сам (channels.py).
     channels: list[str] = Field(default_factory=list)  # @username или t.me/…
     channels_days: int = 3                    # первое чтение канала — посты за столько дней
     channels_every_minutes: int = 30          # autopilot: проверять каналы так часто

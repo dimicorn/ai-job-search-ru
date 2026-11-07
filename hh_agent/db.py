@@ -59,7 +59,9 @@ CREATE TABLE IF NOT EXISTS tg_dialogs (
     survey       TEXT,   -- название вакансии текущего опроса
     switched_at  TEXT    -- когда агент последний раз просил бота сменить вакансию
 );
--- Посты Telegram-каналов с вакансиями: vacancy (балл ≥ min_score) | low | filtered (стоп-слово) | other (не вакансия)
+-- Посты Telegram-каналов с вакансиями: vacancy (балл ≥ min_score) | low | filtered (стоп-слово) | other (не вакансия);
+-- после кнопки «Откликнуться» под постом (бот вакансий) — applied | unconfirmed | human (бот ждёт вас) | skipped | error.
+-- apply_data — callback-данные кнопки отклика ('' — кнопки нет, NULL — ещё не проверяли)
 CREATE TABLE IF NOT EXISTS tg_posts (
     channel   TEXT,
     msg_id    INTEGER,
@@ -72,6 +74,9 @@ CREATE TABLE IF NOT EXISTS tg_posts (
     status    TEXT,
     text      TEXT,
     found_at  TEXT,
+    apply_data TEXT,
+    applied_at TEXT,
+    note      TEXT,
     PRIMARY KEY (channel, msg_id)
 );
 -- Последний разобранный пост канала
@@ -120,6 +125,11 @@ class DB:
             if col not in tg_cols:
                 self.conn.execute(f"ALTER TABLE tg_dialogs ADD COLUMN {col} TEXT")
                 self.conn.commit()
+        post_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(tg_posts)")}
+        for col in ("apply_data", "applied_at", "note"):  # отклик кнопкой под постом появился позже таблицы
+            if col not in post_cols:
+                self.conn.execute(f"ALTER TABLE tg_posts ADD COLUMN {col} TEXT")
+                self.conn.commit()
 
     def exists(self, vid: int) -> bool:
         return self.conn.execute("SELECT 1 FROM vacancies WHERE id=?", (vid,)).fetchone() is not None
@@ -164,10 +174,12 @@ class DB:
         return self.conn.execute("SELECT * FROM vacancies WHERE id=?", (vid,)).fetchone()
 
     def applied_today(self) -> int:
+        """Отклики за сегодня: на сайтах и кнопкой под постами Telegram (human — кнопка нажата, бот ждёт вас)."""
         today = date.today().isoformat()
         return self.conn.execute(
-            "SELECT COUNT(*) FROM vacancies WHERE status IN ('applied', 'unconfirmed') AND applied_at >= ?", (today,)
-        ).fetchone()[0]
+            "SELECT (SELECT COUNT(*) FROM vacancies WHERE status IN ('applied', 'unconfirmed') AND applied_at >= ?)"
+            " + (SELECT COUNT(*) FROM tg_posts WHERE status IN ('applied', 'unconfirmed', 'human') AND applied_at >= ?)",
+            (today, today)).fetchone()[0]
 
     def tg_link(self, vid: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM tg_links WHERE vacancy_id=?", (vid,)).fetchone()
@@ -239,6 +251,17 @@ class DB:
         marks = ", ".join("?" * (len(fields) + 2))
         self.conn.execute(f"INSERT OR REPLACE INTO tg_posts ({cols}) VALUES ({marks})", (channel, msg_id, *fields.values()))
         self.conn.commit()
+
+    def update_tg_post(self, channel: str, msg_id: int, **fields: Any) -> None:
+        sets = ", ".join(f"{k}=?" for k in fields)
+        self.conn.execute(f"UPDATE tg_posts SET {sets} WHERE channel=? AND msg_id=?", (*fields.values(), channel, msg_id))
+        self.conn.commit()
+
+    def tg_to_apply(self, min_score: int, since: str) -> list[sqlite3.Row]:
+        """Подходящие посты не раньше since, под которыми может быть кнопка отклика, и посты, где бот ждёт вас."""
+        return self.conn.execute(
+            "SELECT * FROM tg_posts WHERE ((status='vacancy' AND score >= ? AND (apply_data IS NULL OR apply_data != ''))"
+            " OR status='human') AND posted_at >= ? ORDER BY score DESC, posted_at DESC", (min_score, since)).fetchall()
 
     def tg_posts(self, status: str, since: str) -> list[sqlite3.Row]:
         """Посты со статусом status, опубликованные не раньше since, — лучшие и свежие сверху."""

@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from hh_agent import channels as ch
+from hh_agent import recruiters as r
 from hh_agent.llm import LimitReached
+
+from .conftest import Button, FakeBot
 
 VACANCY = "Ищем ML-инженера в команду компьютерного зрения. " * 5  # длиннее MIN_CHARS
 
@@ -131,3 +134,149 @@ def test_prompt_has_resume_and_posts(cfg, db, chan, monkeypatch):
     assert ch.scan(cfg, db, chan) == 1
     system, user, purpose = calls[0]
     assert "PyTorch, OpenCV" in system and '<post id="1">' in user and purpose == "channels"
+
+
+# ── отклик кнопкой под постом бота вакансий (getmatch: @g_jobbot) ──────────
+BOT = "g_jobbot"
+HEAD = "ML Engineer [Remote] @ Acme"
+POST = f"{HEAD}\n\n📍Москва\n\nСтек: Python, PyTorch. " + "Задачи интересные. " * 10
+SENT = f"{HEAD}\n\n✅ Отклик отправлен.\n\n Отменить действие: /discard_x"
+
+
+def _apply_btns(data=b"application__send__37153"):
+    apply = Button("👉 Откликнуться в боте", "InlineButtonTypeCallback")
+    apply.data = data
+    return [[apply], [Button("Описание", "InlineButtonTypeUrlAuth")]]
+
+
+class JobBot(FakeBot):
+    """Чат с ботом вакансий — и как клиент Telethon для channels.apply_posts."""
+
+    def get_entity(self, name):
+        return SimpleNamespace(username=name, id=1)
+
+    def get_messages(self, entity, ids):
+        return next((m for m in self.messages if m.id == ids), None)
+
+
+@pytest.fixture
+def jobbot(cfg, bot, monkeypatch):
+    cfg.telegram.enabled, cfg.telegram.channels = True, ["@g_jobbot"]
+    cfg.analyst.min_score, cfg.apply.auto.min_score = 65, 70
+    b = JobBot()
+    monkeypatch.setattr(r, "_messages", lambda client, entity, n: b.messages[-n:])
+    monkeypatch.setattr(ch, "notify", lambda *a: None)
+    monkeypatch.setattr(r, "_decide", lambda *a, **k: pytest.fail("LLM не нужна"))
+    return b
+
+
+def _post(db, b, score=80, ago=timedelta(hours=1), apply_data="application__send__37153"):
+    m = b.add(POST, ago, buttons=_apply_btns())
+    db.save_tg_post(BOT, m.id, posted_at=(datetime.now() - ago).isoformat(timespec="seconds"),
+                    link=f"https://t.me/{BOT}/{m.id}", title="ML Engineer", company="Acme", score=score,
+                    reasons="стек совпадает", status="vacancy", text=POST, found_at="", apply_data=apply_data)
+    return m
+
+
+def _rstep(action, button=-1, text="", missing=""):
+    return r.Step(action=action, text=text, button=button, missing_fact=missing, reason="", final=False, reusable=False)
+
+
+def test_apply_button_found_by_text_and_callback():
+    b = FakeBot()
+    assert ch.apply_button(b.add(POST, buttons=_apply_btns())) == "application__send__37153"
+    assert ch.apply_button(b.add(POST, buttons=[[Button("Описание", "InlineButtonTypeUrlAuth")]])) is None
+    assert ch.apply_button(b.add(POST)) is None
+
+
+def test_scan_stores_apply_button_and_skips_confirmations(cfg, db, chan, monkeypatch):
+    m = chan.add(VACANCY)
+    m.buttons = _apply_btns()
+    chan.add(SENT + " Гражданство: Россия. " * 5)  # подтверждение отклика длиннее MIN_CHARS — не в LLM
+    _llm(monkeypatch, {1: (True, 80, "ML Engineer")})
+    ch.scan(cfg, db, chan)
+    assert db.tg_post("ml_jobs", 1)["apply_data"] == "application__send__37153"
+    assert db.tg_post("ml_jobs", 2)["status"] == "other"
+
+
+def test_auto_press_confirmed_by_bot(cfg, db, jobbot):
+    _post(db, jobbot)
+    clicks = []
+    jobbot.on_click = lambda m, i: (clicks.append(i), jobbot.add(SENT))
+    assert ch.apply_posts(cfg, db, jobbot, "auto") == 1
+    post = db.tg_post(BOT, 1)
+    assert clicks == [0] and post["status"] == "applied" and "Отклик отправлен" in post["note"]
+    assert db.applied_today() == 1  # в общем дневном лимите
+
+
+def test_bot_question_is_answered_with_button(cfg, db, jobbot, monkeypatch):
+    _post(db, jobbot)
+    ask = "Подтвердите гражданство: 🇷🇺 Россия"
+    jobbot.on_click = lambda m, i: jobbot.add(ask, buttons=[[Button("Подтвердить", "InlineButtonTypeCallback")]]) \
+        if m.message == POST else jobbot.add(SENT)
+    seen = {}
+
+    def decide(cfg_, db_, msgs, vid, survey, hanging=None, vacancy=None):
+        seen.update(msgs=[m.message for m in msgs], vacancy=vacancy)
+        return _rstep("button", 0)
+
+    monkeypatch.setattr(r, "_decide", decide)
+    assert ch.apply_posts(cfg, db, jobbot, "auto") == 1
+    assert seen == {"msgs": [ask], "vacancy": POST} and db.tg_post(BOT, 1)["status"] == "applied"
+
+
+def test_unknown_question_goes_to_human(cfg, db, jobbot, monkeypatch):
+    _post(db, jobbot)
+    jobbot.on_click = lambda m, i: jobbot.add("Пришлите ссылку на GitHub")
+    monkeypatch.setattr(r, "_decide", lambda *a, **k: _rstep("human", missing="ссылка на GitHub"))
+    assert ch.apply_posts(cfg, db, jobbot, "auto") == 0
+    post = db.tg_post(BOT, 1)
+    assert post["status"] == "human" and post["note"] == "ссылка на GitHub"
+    assert "GitHub" in cfg.path("logs/questions.md").read_text(encoding="utf-8")
+    # вы ответили боту сами, он подтвердил — в следующий раз агент это видит и ничего не жмёт
+    jobbot.add(SENT)
+    jobbot.on_click = lambda m, i: pytest.fail("второй раз не нажимаем")
+    ch.apply_posts(cfg, db, jobbot, "auto")
+    assert db.tg_post(BOT, 1)["status"] == "applied"
+
+
+def test_silent_bot_is_unconfirmed(cfg, db, jobbot):
+    _post(db, jobbot)
+    assert ch.apply_posts(cfg, db, jobbot, "auto") == 0
+    assert db.tg_post(BOT, 1)["status"] == "unconfirmed" and db.applied_today() == 1
+
+
+def test_manual_apply_is_recognised_without_click(cfg, db, jobbot):
+    _post(db, jobbot)
+    jobbot.add(SENT)  # вы откликнулись в Telegram сами
+    jobbot.on_click = lambda m, i: pytest.fail("отклик уже есть")
+    ch.apply_posts(cfg, db, jobbot, "auto")
+    assert db.tg_post(BOT, 1)["status"] == "applied"
+
+
+def test_old_post_without_stored_button_is_checked_live(cfg, db, jobbot):
+    _post(db, jobbot, apply_data=None)  # сохранён до появления откликов кнопкой
+    jobbot.on_click = lambda m, i: jobbot.add(SENT)
+    assert ch.apply_posts(cfg, db, jobbot, "auto") == 1
+    assert db.tg_post(BOT, 1)["apply_data"] == "application__send__37153"
+
+
+@pytest.mark.parametrize("setup", ["low_score", "daily_limit", "dry_run", "too_old"])
+def test_no_click(cfg, db, jobbot, setup):
+    _post(db, jobbot, score=68 if setup == "low_score" else 80,  # 68 < apply.auto.min_score
+          ago=timedelta(days=ch.APPLY_DAYS + 1) if setup == "too_old" else timedelta(hours=1))
+    if setup == "daily_limit":
+        cfg.apply.daily_limit = 0
+    jobbot.on_click = lambda m, i: pytest.fail("нажимать нельзя")
+    assert ch.apply_posts(cfg, db, jobbot, "auto", dry_run=setup == "dry_run") == 0
+    assert db.tg_post(BOT, 1)["status"] == "vacancy"
+
+
+def test_ask_mode(cfg, db, jobbot, monkeypatch):
+    _post(db, jobbot, score=68)  # ниже порога auto, но не ниже analyst.min_score — спрашиваем
+    _post(db, jobbot, score=66)
+    answers = iter(["?", "y", "s"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    jobbot.on_click = lambda m, i: jobbot.add(SENT) if m.id == 1 else pytest.fail("пропущенную не жмём")
+    assert ch.apply_posts(cfg, db, jobbot, "ask") == 1
+    assert db.tg_post(BOT, 1)["status"] == "applied" and db.tg_post(BOT, 2)["status"] == "skipped"
