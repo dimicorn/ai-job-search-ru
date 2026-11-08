@@ -212,7 +212,8 @@ def scan(cfg: Config, db: DB, page: Page, sources: set[str] | None = None) -> in
             continue
         search_page, fetch_details = SOURCES[s.source]
         console.rule(f"[bold]Поиск: {s.name}[/] ({SITES[s.source]})")
-        stats = {"source": s.source, "total": None, "pages": 0, "added": 0, "filtered": 0, "seen": 0, "responded": 0}
+        stats = {"source": s.source, "total": None, "pages": 0, "added": 0, "filtered": 0, "seen": 0, "responded": 0,
+                 "duplicates": 0}
         by_date = sorted_by_date(s)
         for n in range(s.max_pages):
             stop.check()  # SIGTERM в autopilot: браузер жив, но новые страницы не нужны
@@ -246,6 +247,12 @@ def scan(cfg: Config, db: DB, page: Page, sources: set[str] | None = None) -> in
                 if reason:
                     db.insert(vid, **card, status="filtered", filter_reason=reason)
                     stats["filtered"] += 1
+                    continue
+                if cfg.filters.skip_duplicates and (dup := db.duplicate_of(vid, card["title"], card["company"])):
+                    # Копии одной вакансии (по городам, перевыкладки) — страницу не открываем, LLM не тратим.
+                    db.insert(vid, **card, status="filtered", filter_reason=f"дубль вакансии {dup}")
+                    stats["filtered"] += 1
+                    stats["duplicates"] += 1
                     continue
 
                 pause(cfg.browser.delay_seconds)

@@ -66,3 +66,62 @@ def test_status_updated_even_when_page_has_only_known_vacancies(cfg, db, site):
     site += [(7, True), (8, False)]
     scout.scan(cfg, db, page=None)
     assert db.get(7)["status"] == "applied" and db.get(8)["status"] == "scored"
+
+
+@pytest.fixture
+def same_title(cfg, monkeypatch, site):
+    """Все карточки выдачи — одна вакансия («Инженер» в Acme), выложенная под разными id."""
+    opened: list[int] = []
+    search_page, details = scout.SOURCES["hh"]
+
+    def details_spy(page, vid):
+        opened.append(vid)
+        return details(page, vid)
+
+    def cards(vid):
+        return {**_card(vid), "title": "Инженер"}
+
+    monkeypatch.setitem(scout.SOURCES, "hh", (
+        lambda page, s, n: (len(site), [(vid, cards(vid), resp) for vid, resp in site] if n == 0 else []),
+        details_spy))
+    return opened
+
+
+def test_copies_of_one_vacancy_are_not_opened(cfg, db, site, same_title):
+    site += [(10, False), (11, False), (12, False)]
+    assert scout.scan(cfg, db, page=None) == 1
+    assert same_title == [10]  # страницы копий не открывались
+    assert db.get(10)["status"] == "new"
+    for vid in (11, 12):
+        assert (db.get(vid)["status"], db.get(vid)["filter_reason"]) == ("filtered", "дубль вакансии 10")
+
+
+def test_duplicate_of_known_vacancy(cfg, db, site, same_title):
+    db.insert(3, **{**_card(3), "title": "Инженер"}, status="skipped", score=20)
+    site.append((20, False))
+    scout.scan(cfg, db, page=None)
+    assert db.get(20)["filter_reason"] == "дубль вакансии 3"
+
+
+@pytest.mark.parametrize("status, reason", [("filtered", "закрыта"), ("error", None)])
+def test_closed_or_failed_original_is_not_a_duplicate(cfg, db, site, same_title, status, reason):
+    """Перевыложенная закрытая вакансия — снова живая; с ошибкой — оригинал так и не прочитан."""
+    db.insert(3, **{**_card(3), "title": "Инженер"}, status=status, filter_reason=reason)
+    site.append((20, False))
+    assert scout.scan(cfg, db, page=None) == 1 and same_title == [20]
+
+
+def test_duplicates_need_company_same_site_and_option(cfg, db):
+    db.insert(1, title="Инженер", company="Acme", status="new")
+    db.insert(2, title="Инженер", company=None, status="new")
+    assert db.duplicate_of(5, "Инженер", "Acme") == 1
+    assert db.duplicate_of(5, "Инженер", None) is None             # анонимный работодатель
+    assert db.duplicate_of(5, "Инженер", "Other") is None
+    assert db.duplicate_of(1_000_000_005, "Инженер", "Acme") is None  # Хабр не сверяется с hh
+    assert db.duplicate_of(1, "Инженер", "Acme") is None             # сама с собой — не дубль
+
+
+def test_duplicates_kept_when_option_off(cfg, db, site, same_title):
+    cfg.filters.skip_duplicates = False
+    site += [(10, False), (11, False)]
+    assert scout.scan(cfg, db, page=None) == 2
