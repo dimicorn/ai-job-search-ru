@@ -54,12 +54,17 @@ def _thread(target, *args, name: str) -> threading.Thread:
 
 
 def _in_window(cfg: Config, now: datetime | None = None) -> bool:
+    """Рабочие часы apply.auto.active_hours: [8, 23] — с 8:00 до 23:00; [22, 6] — через полночь, с 22:00
+    до 6:00; одинаковые часы — рабочих часов нет. weekdays_only — по дню, в который окно началось:
+    ночь с пятницы на субботу рабочая, с воскресенья на понедельник — нет."""
     au = cfg.apply.auto
     now = now or datetime.now()
     start, end = au.active_hours
-    if au.weekdays_only and now.weekday() >= 5:
-        return False
-    return start <= now.hour < end
+    if start <= end:
+        inside, day = start <= now.hour < end, now
+    else:
+        inside, day = now.hour >= start or now.hour < end, now - timedelta(days=now.hour < end)
+    return inside and not (au.weekdays_only and day.weekday() >= 5)
 
 
 def _scaled(rng: tuple[float, float], k: float) -> float:

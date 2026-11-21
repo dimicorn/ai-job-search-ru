@@ -214,3 +214,22 @@ def test_telegram_thread_does_not_press_buttons_off_hours(auto, db, monkeypatch)
     monkeypatch.setattr(autopilot.channels, "run", lambda cfg, db_, **kw: reads.append(kw))
     autopilot.run_auto(auto, db)
     assert reads == [{"apply": None, "dry_run": False}]  # каналы читаем, но кнопку не жмём
+
+
+@pytest.mark.parametrize("hours, weekdays, when, inside", [
+    ((8, 23), False, "2026-11-18 08:00", True),
+    ((8, 23), False, "2026-11-18 23:00", False),
+    ((22, 6), False, "2026-11-18 23:30", True),   # через полночь: вечер
+    ((22, 6), False, "2026-11-19 05:59", True),   #   и утро
+    ((22, 6), False, "2026-11-18 12:00", False),
+    ((22, 6), True, "2026-11-21 02:00", True),    # ночь с пятницы на субботу — ещё пятница
+    ((22, 6), True, "2026-11-21 23:00", False),   # суббота вечером
+    ((22, 6), True, "2026-11-23 03:00", False),   # ночь с воскресенья на понедельник
+    ((8, 23), True, "2026-11-21 12:00", False),
+    ((0, 0), False, "2026-11-18 12:00", False),   # рабочих часов нет
+    ((0, 24), False, "2026-11-18 00:00", True),
+])
+def test_active_hours_window(cfg, hours, weekdays, when, inside):
+    from datetime import datetime
+    cfg.apply.auto.active_hours, cfg.apply.auto.weekdays_only = hours, weekdays
+    assert autopilot._in_window(cfg, datetime.fromisoformat(when)) is inside
