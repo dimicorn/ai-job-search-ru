@@ -32,6 +32,49 @@ HH_PAGE = """<!doctype html><html lang="ru"><body>
 HH_APPLIED = """<!doctype html><html lang="ru"><body>
 <a data-qa="vacancy-response-link-view-topic">Вы откликнулись</a></body></html>"""
 
+# Отклик уходит сразу: появляется «Резюме доставлено» с кнопкой «Add cover letter», а поверх страницы —
+# окно «дополните профиль» из двух шагов с затемнением, которое перехватывает клики.
+HH_RESPONDED_UPSELL = """<!doctype html><html lang="ru"><body>
+<a href="#" data-qa="vacancy-response-link-top" onclick="this.remove();
+   document.getElementById('done').hidden = false; document.getElementById('upsell').hidden = false;
+   return false">Откликнуться</a>
+<div id="done" hidden><p>CV delivered</p>
+  <button type="button" data-qa="responded-success-attach-cover-letter-text"
+          onclick="document.getElementById('dlg').hidden = false">Add cover letter</button></div>
+<div id="dlg" role="dialog" hidden>
+  <textarea data-qa="vacancy-response-popup-form-letter-input" name="letter"></textarea>
+  <button data-qa="vacancy-response-submit-popup" onclick="
+    window.sent = document.querySelector('[name=letter]').value; document.getElementById('dlg').remove();
+    document.body.insertAdjacentHTML('beforeend',
+      '<a data-qa=&quot;vacancy-response-link-view-topic&quot;>Вы откликнулись</a>')">Send</button>
+</div>
+<div id="upsell" hidden data-qa="modal-overlay" style="position:fixed; inset:0; z-index:10; background:#0008">
+  <div role="dialog" data-step="2"><p>What format do you prefer?</p>
+    <label><input type="checkbox" checked> Remote</label>
+    <button data-qa="additional-data-collector__popup-close" onclick="this.closest('[role=dialog]').innerHTML =
+      '<p>Shall we add a photo?</p><button data-qa=&quot;additional-data-collector__popup-close&quot; '
+      + 'onclick=&quot;document.getElementById(\\'upsell\\').remove()&quot;>×</button>'">×</button>
+  </div>
+</div>
+</body></html>"""
+
+# «Откликнуться» сначала открывает капчу в том же role=dialog, что и форма; повторный клик после капчи —
+# обычное окно отклика.
+HH_CAPTCHA_THEN_FORM = """<!doctype html><html lang="ru"><body>
+<a href="#" data-qa="vacancy-response-link-top" onclick="
+   if (!window.clicked) document.getElementById('cap').hidden = false;
+   else document.getElementById('dlg').hidden = false;
+   window.clicked = (window.clicked || 0) + 1; return false">Откликнуться</a>
+<div id="cap" role="dialog" hidden><p>Complete the CAPTCHA</p><input name="captcha_text"></div>
+<div id="dlg" role="dialog" hidden>
+  <textarea data-qa="vacancy-response-popup-form-letter-input" name="letter"></textarea>
+  <button data-qa="vacancy-response-submit-popup" onclick="
+    window.sent = document.querySelector('[name=letter]').value; document.getElementById('dlg').remove();
+    document.body.insertAdjacentHTML('beforeend',
+      '<a data-qa=&quot;vacancy-response-link-view-topic&quot;>Вы откликнулись</a>')">Отправить</button>
+</div>
+</body></html>"""
+
 QUESTION = """<div class="question"><p>Ваши ожидания по зарплате?</p><input type="text" name="q1"></div>"""
 
 # Хабр Карьера: «Откликнуться» сразу отправляет отклик, затем появляется поле письма и «Дополнить отклик».
@@ -97,6 +140,42 @@ def test_hh_already_applied(site, cfg):
     url = "https://hh.ru/vacancy/3"
     site.pages[url] = HH_APPLIED
     assert _applier(site, cfg).apply(3, url, LETTER)[0] == "already_applied"
+
+
+def test_hh_letter_after_response_behind_upsell(site, cfg):
+    """Окно «дополните профиль» закрывается по всем шагам, затем письмо уходит через «Add cover letter»."""
+    url = "https://hh.ru/vacancy/6"
+    site.pages[url] = HH_RESPONDED_UPSELL
+    status, _ = _applier(site, cfg).apply(6, url, LETTER)
+    assert status == "applied"
+    assert site.evaluate("window.sent") == LETTER
+
+
+def test_hh_captcha_after_respond_is_not_a_form(site, cfg):
+    """Капча после «Откликнуться» — не форма отклика: без человека отклик останавливается CaptchaError."""
+    from hh_agent.browser import CaptchaError
+
+    url = "https://hh.ru/vacancy/7"
+    site.pages[url] = HH_CAPTCHA_THEN_FORM
+    with pytest.raises(CaptchaError):
+        _applier(site, cfg).apply(7, url, LETTER)
+    assert site.evaluate("window.sent") is None
+
+
+def test_hh_captcha_passed_then_respond_again(site, cfg, monkeypatch):
+    """Человек прошёл капчу, а отклик не ушёл — агент снова жмёт «Откликнуться» и пишет письмо."""
+    from hh_agent import applier
+
+    def solve(page):  # капчу «проходит человек»
+        if page.locator("#cap").is_visible():
+            page.evaluate("document.getElementById('cap').remove()")
+
+    monkeypatch.setattr(applier, "check_captcha", solve)
+    url = "https://hh.ru/vacancy/8"
+    site.pages[url] = HH_CAPTCHA_THEN_FORM
+    status, _ = _applier(site, cfg).apply(8, url, LETTER)
+    assert status == "applied"
+    assert site.evaluate("[window.clicked, window.sent]") == [2, LETTER]
 
 
 def test_hh_employer_question_from_faq(site, cfg):

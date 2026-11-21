@@ -37,7 +37,8 @@ SEL = {
     "responded": "[data-qa='vacancy-response-link-view-topic']",
     "relocation": "[data-qa='relocation-warning-confirm']",
     "popup_letter": "[data-qa='vacancy-response-popup-form-letter-input']",
-    "letter_toggle": "[data-qa='add-cover-letter'], [data-qa='vacancy-response-letter-toggle']",
+    "letter_toggle": ("[data-qa='add-cover-letter'], [data-qa='vacancy-response-letter-toggle'], "
+                      "[data-qa='responded-success-attach-cover-letter-text']"),
     "popup_submit": "[data-qa='vacancy-response-submit-popup']",
     "informer_letter": "[data-qa='vacancy-response-letter-informer'] textarea",
     "informer_submit": "[data-qa='vacancy-response-letter-submit']",
@@ -67,6 +68,9 @@ SUBMIT_TEXT = r"^\s*(Откликнуться|Отправить|Send applicatio
 FORM = ", ".join([*(SEL[k] for k in ("popup_letter", "letter_toggle", "popup_submit", "informer_letter")),
                   *FALLBACK.values(), "[role='dialog']"])
 AFTER_CLICK = f"{FORM}, {SEL['relocation']}"
+# После отклика hh предлагает дополнить профиль (формат работы, фото…): окно из нескольких шагов
+# с затемнением, которое перехватывает клики по странице (в том числе по «Добавить письмо»).
+UPSELL_CLOSE = "[data-qa='additional-data-collector__popup-close']"
 
 # Хабр Карьера: «Откликнуться» сразу отправляет отклик, затем в той же секции появляется
 # поле письма и кнопка «Дополнить отклик».
@@ -159,15 +163,30 @@ class Applier:
     def _field(self, key: str):
         return self._find(key, FALLBACK.get(key))
 
+    def _dismiss_upsell(self) -> None:
+        """Закрыть окна «дополните профиль» (все шаги подряд), если они открыты."""
+        for _ in range(6):
+            btn = self.page.locator(UPSELL_CLOSE).locator("visible=true")
+            if not btn.count():
+                return
+            self._beat()
+            btn.first.click()
+            self.page.wait_for_timeout(600)
+
     def _open_letter(self) -> None:
         """Раскрыть поле письма, если оно спрятано за кнопкой/ссылкой."""
+        self._dismiss_upsell()
         btn = self._find("letter_toggle")
         if btn is None:
             txt = self.page.get_by_text(re.compile(TOGGLE_TEXT, re.I)).locator("visible=true")
             btn = txt.first if txt.count() else None
         if btn is not None:
             self._beat()
-            btn.click()
+            try:
+                btn.click(timeout=5000)
+            except PWTimeout:  # окно «дополните профиль» могло появиться с задержкой и перекрыть кнопку
+                self._dismiss_upsell()
+                btn.click()
             self.page.wait_for_timeout(700)
 
     def _submit_button(self, key: str = "popup_submit"):
@@ -351,6 +370,18 @@ class Applier:
                 return "applied", "отклик ушёл сразу, без письма"
             return self._hand_over(letter, self._debug_dump(vid, "форма отклика не распознана"))
 
+        # Капча после клика открывается тем же модальным окном ([role=dialog]), что и форма отклика.
+        if captcha_visible(page):
+            check_captcha(page)
+            # Отклик мог не уйти: кнопка на месте, формы нет — нажимаем ещё раз.
+            if (page.locator(SEL["respond"]).locator("visible=true").count()
+                    and not page.locator(FORM).locator("visible=true").count()):
+                self._click(SEL["respond"])
+            try:
+                page.wait_for_selector(AFTER_CLICK, timeout=self.form_timeout)
+            except PWTimeout:
+                pass
+
         if page.locator(SEL["relocation"]).count():
             self._click(SEL["relocation"])
             try:
@@ -359,6 +390,8 @@ class Applier:
                 pass
             if "vacancy_response" in page.url:
                 return self._questionnaire(vid, letter, vacancy)
+
+        self._dismiss_upsell()  # его чекбоксы (формат работы) иначе примем за вопросы работодателя
 
         if self.cfg.apply.resume_title:  # только в окне отклика: название бывает и в заголовке вакансии, и в ссылках
             dlg = page.locator("[role='dialog']").locator("visible=true")

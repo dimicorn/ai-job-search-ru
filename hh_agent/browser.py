@@ -5,6 +5,7 @@ import random
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -185,10 +186,16 @@ def check_captcha(page: Page) -> None:
     """hh.ru иногда показывает капчу. Агент её никогда не решает сам: в терминале ждёт Enter,
     в auto — уведомляет и ждёт, пока её пройдёт человек (apply.auto.captcha_wait_minutes)."""
     if captcha_visible(page):
-        if not sys.stdin.isatty():
+        if _unattended():
             _wait_for_human(page)
             return
         input("\n⚠️  hh.ru показал капчу. Пройдите её в окне браузера и нажмите Enter… ")
+
+
+def _unattended() -> bool:
+    """Спросить в терминале нельзя: его нет (launchd, cron) или это рабочий поток auto/autopilot — там input()
+    молча ждёт Enter среди строк других потоков, без уведомления и без captcha_wait_minutes."""
+    return not sys.stdin.isatty() or threading.current_thread() is not threading.main_thread()
 
 
 def is_logged_in(page: Page, source: str = "hh") -> bool:
