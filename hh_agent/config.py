@@ -33,6 +33,7 @@ class Filters(BaseModel):
     min_salary: int | None = None
     skip_without_salary: bool = False
     skip_with_employer_test: bool = False
+    skip_duplicates: bool = True  # та же вакансия (название + компания) уже в базе — не открывать
 
 
 class Analyst(BaseModel):

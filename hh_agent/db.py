@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS vacancies (
     attempts      INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_status ON vacancies(status);
+CREATE INDEX IF NOT EXISTS ix_title_company ON vacancies(title, company);
 
 -- Ссылки на ботов-рекрутеров из чатов hh; started — бот уже запущен по ссылке или переписка с ним была
 CREATE TABLE IF NOT EXISTS tg_links (
@@ -104,6 +105,9 @@ COLUMNS = {
 }
 
 
+# id вакансий Хабра — от миллиарда, у hh меньше: так дубли ищутся только в пределах сайта.
+HABR_MIN_ID = 1_000_000_000
+
 # Статусы, которые устаревают, когда отклик на вакансию появился на сайте. filtered («уже откликались»,
 # стоп-слово) и applied не трогаем: по ним агент ничего не делает.
 RESPONDABLE = ("new", "scored", "skipped", "manual", "error", "unconfirmed")
@@ -133,6 +137,18 @@ class DB:
 
     def exists(self, vid: int) -> bool:
         return self.conn.execute("SELECT 1 FROM vacancies WHERE id=?", (vid,)).fetchone() is not None
+
+    def duplicate_of(self, vid: int, title: str, company: str | None) -> int | None:
+        """Другая вакансия того же сайта с тем же названием и компанией (работодатель выложил копии — по городам
+        или повторно). Закрытые и с ошибкой не считаются: перевыложенная закрытая вакансия — снова живая.
+        Без компании (анонимный работодатель) дублем не считаем. Возвращает id первой из таких."""
+        if not company or not title:
+            return None
+        row = self.conn.execute(
+            "SELECT id FROM vacancies WHERE title=? AND company=? AND id<>? AND (id>=?)=(?>=?) "
+            "AND status<>'error' AND COALESCE(filter_reason, '')<>'закрыта' ORDER BY id LIMIT 1",
+            (title, company, vid, HABR_MIN_ID, vid, HABR_MIN_ID)).fetchone()
+        return row[0] if row else None
 
     def insert(self, vid: int, **fields: Any) -> None:
         fields = {k: _enc(v) for k, v in fields.items() if k in COLUMNS}
