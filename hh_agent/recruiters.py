@@ -328,12 +328,14 @@ def _vacancy_context(cfg: Config, db: DB, vid: int | None, survey: str | None) -
             + "\n".join(f"- {r['title']} ({r['company']})" for r in recent) if recent else "неизвестна")
 
 
-def _decide(cfg: Config, db: DB, msgs: list, vid: int | None, survey: str | None, hanging=None) -> Step:
+def _decide(cfg: Config, db: DB, msgs: list, vid: int | None, survey: str | None, hanging=None,
+            vacancy: str | None = None) -> Step:
+    """vacancy — текст вакансии, если её нет в базе (пост бота вакансий)."""
     system = SYSTEM.format(consent=CONSENT if cfg.telegram.accept_consent else "", style=ANSWER_STYLE)
     user = (f"<resume>\n{cfg.resume_text().strip()}\n</resume>\n\n"
             f"<facts>\n{cfg.questions.facts.strip() or '—'}\n</facts>\n\n"
             f"<preferences>\n{cfg.analyst.preferences.strip() or '—'}\n</preferences>\n\n"
-            f"<vacancy>\n{_vacancy_context(cfg, db, vid, survey)}\n</vacancy>\n\n"
+            f"<vacancy>\n{vacancy or _vacancy_context(cfg, db, vid, survey)}\n</vacancy>\n\n"
             "<chat>\n" + "\n".join(_fmt(m) for m in msgs) + "\n</chat>"
             + ("\n\nПоследним пришёл список вакансий, но выше, после моего последнего ответа, бот писал:\n"
                "<unanswered>\n" + "\n".join(_fmt(m) for m in _unanswered(msgs)) + "\n</unanswered>\n"
