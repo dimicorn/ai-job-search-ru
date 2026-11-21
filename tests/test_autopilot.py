@@ -23,6 +23,7 @@ def _fresh_stop(monkeypatch):
 class FakeApplier:
     """Отклик без браузера: статус по id вакансии (по умолчанию applied)."""
     calls: list[int] = []
+    letters: list[str] = []
     statuses: dict[int, tuple[str, str | None]] = {}
     on_apply = None
 
@@ -31,6 +32,7 @@ class FakeApplier:
 
     def apply(self, vid, url, letter, vacancy=""):
         FakeApplier.calls.append(vid)
+        FakeApplier.letters.append(letter)
         if FakeApplier.on_apply:
             FakeApplier.on_apply(vid)
         if self.mode.dry_run:
@@ -58,7 +60,7 @@ def auto(cfg, db, monkeypatch):
     monkeypatch.setattr(autopilot, "SiteTabs", lambda ctx, page: (lambda src: None))
     monkeypatch.setattr(autopilot, "is_logged_in", lambda page, src: True)
     monkeypatch.setattr(autopilot, "Applier", FakeApplier)
-    FakeApplier.calls, FakeApplier.statuses, FakeApplier.on_apply = [], {}, None
+    FakeApplier.calls, FakeApplier.letters, FakeApplier.statuses, FakeApplier.on_apply = [], [], {}, None
     return cfg
 
 
@@ -161,6 +163,36 @@ def test_autopilot_applies_to_vacancies_found_during_the_run(auto, db, monkeypat
     monkeypatch.setattr(autopilot.analyst_mod, "analyze_new", fake_analyze)
     autopilot.run_auto(auto, db, produce=True)
     assert FakeApplier.calls == [7] and db.get(7)["status"] == "applied"
+
+
+def test_autopilot_waits_for_letters_from_analysis(auto, db, monkeypatch):
+    """Пока идёт оценка, вакансию без письма не берём: письмо напишет оценка, а не поток откликов."""
+    import time
+
+    def fake_scan(cfg, db_, page, sources):
+        if "hh" in sources:
+            db_.insert(8, title="ML Engineer 8", company="Acme", url="https://hh.ru/vacancy/8", status="new")
+        return 1
+
+    def fake_analyze(cfg, db_):
+        for r in db_.by_status("new"):
+            db_.update(r["id"], status="scored", score=90)  # оценка готова, письма ещё пишутся
+        time.sleep(0.5)
+        db_.update(8, cover_letter="Письмо из оценки")
+        return 1
+
+    class WorkerAnalyst:  # письмо, которое написал бы сам поток откликов
+        def __init__(self, cfg):
+            pass
+
+        def letter(self, row):
+            return "Письмо потока откликов"
+
+    monkeypatch.setattr(autopilot, "scan", fake_scan)
+    monkeypatch.setattr(autopilot.analyst_mod, "analyze_new", fake_analyze)
+    monkeypatch.setattr(autopilot.analyst_mod, "Analyst", WorkerAnalyst)
+    autopilot.run_auto(auto, db, produce=True)
+    assert FakeApplier.letters == ["Письмо из оценки"]
 
 
 def test_telegram_thread_reads_channels(auto, db, monkeypatch):

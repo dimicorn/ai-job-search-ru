@@ -266,8 +266,9 @@ def _in_parallel(cfg: Config, fn, chunks):
                 other.cancel()
 
 
-def _write_letters(cfg: Config, db: DB, analyst: Analyst, rows) -> int:
-    """Письма для подходящих вакансий пачками (letter_backend не same). Неудачи — письмо напишут при отклике."""
+def _write_letters(cfg: Config, db: DB, analyst: Analyst, rows, only_missing: bool = False) -> int:
+    """Письма для подходящих вакансий пачками (letter_backend не same). Неудачи — письмо напишут при отклике.
+    only_missing — не трогать вакансии, у которых письмо уже появилось (написано при отклике, пока шла пачка)."""
     done = 0
     batches = _in_parallel(cfg, lambda c: analyst.letters_batch(c, {r["id"]: dec_list(r["reasons"]) for r in c}),
                            _chunks(rows, cfg.analyst.letter_batch_size))
@@ -279,6 +280,8 @@ def _write_letters(cfg: Config, db: DB, analyst: Analyst, rows) -> int:
             console.print(f"  [red]× письма: {err}[/]")
             continue
         for r in chunk:
+            if only_missing and (db.get(r["id"]) or {"cover_letter": None})["cover_letter"]:
+                continue
             if letters.get(r["id"]):
                 db.update(r["id"], cover_letter=letters[r["id"]])
                 done += 1
@@ -320,7 +323,7 @@ def analyze_new(cfg: Config, db: DB) -> int:
                 and not r["cover_letter"]]
         if need:
             console.print(f"Пишу письма: {len(need)}")
-            _write_letters(cfg, db, analyst, need)
+            _write_letters(cfg, db, analyst, need, only_missing=True)
     log_event(cfg, "analyze", scored=done, passed=passed, errors=errors, limit=limit,
               backend=cfg.analyst.backend, left=len(rows) - done)
     return done

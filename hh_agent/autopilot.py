@@ -125,7 +125,11 @@ class Run:
         с баллом от target_min_score, когда поиск закончен и сильных вакансий на сайте не осталось."""
         au = self.cfg.apply.auto
         with self.lock:
-            mine = lambda rows: [r for r in rows if source_of(r["url"]) == src and r["id"] not in self.taken]
+            # Пока идёт оценка, вакансию без письма не берём: письма для новых вакансий она пишет пачками сама,
+            # иначе поток откликов написал бы своё (лишний вызов LLM), а пачка потом его перезаписала.
+            producing = self.producing.is_set()
+            mine = lambda rows: [r for r in rows if source_of(r["url"]) == src and r["id"] not in self.taken
+                                 and (r["cover_letter"] or not producing)]
             rows = mine(db.by_status("scored", min_score=self.threshold))
             if not rows and self.fill_to_target and not self.producing.is_set():
                 need = au.daily_target - db.applied_today() - self.inflight
