@@ -122,11 +122,11 @@ def _assess(cfg: Config, posts: list) -> dict[int, PostItem]:
     return {i.post_id: i for i in out.items}
 
 
-def scan_channel(cfg: Config, db: DB, client, name: str) -> list:
+def scan_channel(cfg: Config, db: DB, client, name: str, entity=None) -> list:
     """Прочитать новые посты канала и сохранить их; вернуть подходящие вакансии.
     Курсор канала сдвигается, только когда разобраны все новые посты: упала LLM или модель пропустила
     пост — в следующий раз посты перечитаются, а уже сохранённые повторно в LLM не пойдут."""
-    entity = client.get_entity(name)
+    entity = entity or client.get_entity(name)
     since = datetime.now(UTC) - timedelta(days=cfg.telegram.channels_days)
     posts = _new_posts(client, entity, db.tg_channel_cursor(name), since)
     now = datetime.now().isoformat(timespec="seconds")
@@ -176,12 +176,17 @@ def scan(cfg: Config, db: DB, client) -> int:
     for ch in dict.fromkeys(channel_name(c) for c in cfg.telegram.channels):
         stop.check()
         try:
-            new = scan_channel(cfg, db, client, ch)
+            entity = client.get_entity(ch)
+        except (ValueError, TypeError) as e:  # нет такого канала, приватный без подписки
+            console.print(f"  [red]@{ch}: не открыть канал ({e})[/]")
+            continue
+        try:
+            new = scan_channel(cfg, db, client, ch, entity)
         except LimitReached as e:
             console.print(f"  [yellow]Лимит LLM — каналы дочитаю в следующий раз: {e}[/]")
             break
-        except (ValueError, TypeError) as e:  # нет такого канала, приватный без подписки
-            console.print(f"  [red]@{ch}: не открыть канал ({e})[/]")
+        except (RuntimeError, ValueError) as e:  # LLM упала или ответила не по схеме — остальные каналы читаем
+            console.print(f"  [red]@{ch}: не разобрать посты, дочитаю в следующий раз ({e})[/]")
             continue
         for p in new:
             console.print(f"  @{ch}: [bold]{p['score']}[/] {p['title'] or '—'} ({p['company'] or '—'}) {p['link']}",
@@ -217,10 +222,27 @@ def _head(text: str | None) -> str:
     return rec._norm((text or "").strip().split("\n", 1)[0])
 
 
-def _sent_heads(client, entity) -> set[str]:
-    """Вакансии, отклик на которые бот уже подтвердил (в том числе отправленный вами вручную)."""
-    return {_head(m.message) for m in rec._messages(client, entity, 200)
-            if not m.out and _SENT.search(m.message or "")}
+def _sent_heads(client, entity) -> dict[str, int]:
+    """Вакансии, отклик на которые бот уже подтвердил (в том числе отправленный вами вручную): первая строка
+    поста → номер последнего подтверждения. Первая строка, которая есть у нескольких постов (одинаковые
+    должность и компания, общий заголовок «🔥 Вакансия»), не говорит, на какой из них откликнулись, — её нет."""
+    sent: dict[str, int] = {}
+    posts: dict[str, int] = {}
+    for m in rec._messages(client, entity, 200):
+        if m.out:
+            continue
+        head = _head(m.message)
+        if _SENT.search(m.message or ""):
+            sent[head] = max(sent.get(head, 0), m.id)
+        else:
+            posts[head] = posts.get(head, 0) + 1
+    return {h: i for h, i in sent.items() if h and posts.get(h, 0) <= 1}
+
+
+def _confirmed(sent: dict[str, int], post) -> bool:
+    """Бот подтвердил отклик именно на этот пост: подтверждение с той же первой строкой пришло после него
+    (или это сам пост, который бот изменил)."""
+    return sent.get(_head(post["text"]), 0) >= post["msg_id"]
 
 
 def _label(post) -> str:
@@ -341,7 +363,7 @@ def apply_posts(cfg: Config, db: DB, client, mode: str, dry_run: bool = False) -
     threshold = cfg.apply.auto.min_score if mode == "auto" else cfg.analyst.min_score
     posts = db.tg_to_apply(threshold, (datetime.now() - timedelta(days=APPLY_DAYS)).isoformat())
     entities: dict[str, object] = {}
-    sent: dict[str, set[str]] = {}
+    sent: dict[str, dict[str, int]] = {}
     done = 0
     for post in posts:
         stop.check()
@@ -357,7 +379,7 @@ def apply_posts(cfg: Config, db: DB, client, mode: str, dry_run: bool = False) -
         entity = entities[name]
         if entity is None:
             continue
-        if _head(post["text"]) in sent[name]:  # бот уже подтвердил: откликнулись вы сами или ответили боту за агента
+        if _confirmed(sent[name], post):  # бот уже подтвердил: откликнулись вы сами или ответили боту за агента
             console.print(f"  [dim]{_label(post)}: отклик уже есть[/]", highlight=False)
             if not dry_run:
                 db.update_tg_post(name, mid, status="applied", note="бот подтвердил отклик",
@@ -380,7 +402,7 @@ def apply_posts(cfg: Config, db: DB, client, mode: str, dry_run: bool = False) -
             ch = _ask(post)
             if ch == "q":
                 break
-            if ch == "s":
+            if ch == "s" and not dry_run:
                 db.update_tg_post(name, mid, status="skipped")
             if ch != "y":
                 continue

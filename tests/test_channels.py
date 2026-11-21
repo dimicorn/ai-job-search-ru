@@ -280,3 +280,74 @@ def test_ask_mode(cfg, db, jobbot, monkeypatch):
     jobbot.on_click = lambda m, i: jobbot.add(SENT) if m.id == 1 else pytest.fail("пропущенную не жмём")
     assert ch.apply_posts(cfg, db, jobbot, "ask") == 1
     assert db.tg_post(BOT, 1)["status"] == "applied" and db.tg_post(BOT, 2)["status"] == "skipped"
+
+
+def test_llm_failure_on_one_channel_does_not_stop_others(cfg, db, chan, monkeypatch):
+    cfg.telegram.channels = ["@broken", "@ml_jobs"]
+    chan.add(VACANCY)
+
+    calls = []
+
+    def assess(cfg_, posts):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("ответ модели не по схеме")
+        return {m.id: ch.PostItem(post_id=m.id, is_vacancy=True, title="ML", company="", score=80, reasons=[])
+                for m in posts}
+
+    monkeypatch.setattr(ch, "_assess", assess)
+    assert ch.scan(cfg, db, chan) == 1  # второй канал прочитан, первый — в следующий раз
+    assert db.tg_channel_cursor("broken") == 0 and db.tg_channel_cursor("ml_jobs") == 1
+
+
+def test_llm_error_is_not_reported_as_missing_channel(cfg, db, chan, monkeypatch, capsys):
+    chan.add(VACANCY)
+
+    def assess(cfg_, posts):
+        ch.PostItem.model_validate({})  # ValidationError — подкласс ValueError
+
+    monkeypatch.setattr(ch, "_assess", assess)
+    ch.scan(cfg, db, chan)
+    out = capsys.readouterr().out
+    assert "не открыть канал" not in out and "не разобрать посты" in out
+
+
+def test_missing_channel_is_skipped(cfg, db, chan, monkeypatch, capsys):
+    cfg.telegram.channels = ["@nope", "@ml_jobs"]
+    chan.add(VACANCY)
+    _llm(monkeypatch, {1: (True, 80, "ML")})
+    real = chan.get_entity
+    chan.get_entity = lambda name: (_ for _ in ()).throw(ValueError("No user has \"nope\"")) if name == "nope" \
+        else real(name)
+    assert ch.scan(cfg, db, chan) == 1
+    assert "@nope: не открыть канал" in capsys.readouterr().out
+
+
+def test_ask_mode_dry_run_does_not_store_skip(cfg, db, jobbot, monkeypatch):
+    _post(db, jobbot)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "s")
+    jobbot.on_click = lambda m, i: pytest.fail("пропущенную не жмём")
+    ch.apply_posts(cfg, db, jobbot, "ask", dry_run=True)
+    assert db.tg_post(BOT, 1)["status"] == "vacancy"
+
+
+def test_same_head_of_other_post_is_not_a_confirmation(cfg, db, jobbot):
+    jobbot.add(POST, timedelta(hours=3), buttons=_apply_btns())  # 1 — такая же первая строка, другая вакансия
+    jobbot.add(SENT)                                               # 2 — подтверждение отклика на пост 1
+    m = jobbot.add(POST.replace("Python", "Go"), timedelta(hours=1), buttons=_apply_btns())  # 3
+    db.save_tg_post(BOT, m.id, posted_at=(datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds"),
+                    link=f"https://t.me/{BOT}/{m.id}", title="ML Engineer", company="Acme", score=80,
+                    reasons="", status="vacancy", text=m.message, found_at="", apply_data="application__send__37153")
+    clicks = []
+    jobbot.on_click = lambda msg, i: (clicks.append(msg.id), jobbot.add(SENT))
+    assert ch.apply_posts(cfg, db, jobbot, "auto") == 1
+    assert clicks == [3]  # агент откликнулся сам, а не записал чужое подтверждение
+
+
+def test_confirmation_before_post_is_not_for_it(cfg, db, jobbot):
+    jobbot.add(SENT)  # 1 — подтверждение отклика на прошлую публикацию той же вакансии
+    _post(db, jobbot)  # 2
+    clicks = []
+    jobbot.on_click = lambda msg, i: (clicks.append(msg.id), jobbot.add(SENT))
+    assert ch.apply_posts(cfg, db, jobbot, "auto") == 1
+    assert clicks == [2]

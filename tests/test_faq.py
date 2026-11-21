@@ -66,3 +66,27 @@ def test_lookup_looks_at_the_question_not_the_intro(cfg):
     assert faq.lookup(cfg, "Спасибо, про приписное свидетельство понял. Сколько лет вы работаете с Python?") is None
     assert faq.lookup(cfg, "Хорошо. Есть ли у вас приписное свидетельство?") == "Да, есть приписное свидетельство."
     assert faq.lookup(cfg, "Приписное свидетельство") == "Да, есть приписное свидетельство."  # поле анкеты без «?»
+
+
+def test_learn_keeps_comments_and_unparsed_entries(cfg):
+    """Агент дописывает в конец, а не переписывает: комментарии и черновики без answer остаются."""
+    own = ("# мои ответы\n"
+           "- match: [зарплат]\n  answer: 150 000  # на руки\n"
+           "- match: [релокац]  # черновик, ответ ещё не придумал\n")
+    path = cfg.path(cfg.questions.faq_file)
+    path.write_text(own, encoding="utf-8")
+    faq.learn(cfg, "Когда сможете выйти на работу?", "Через неделю.")
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith(own)
+    assert faq.lookup(cfg, "Когда сможете выйти на работу?") == "Через неделю."
+    cfg.questions.facts += "\nСрок выхода: сразу."
+    faq.learn(cfg, "Когда сможете выйти на работу?", "Сразу.")  # по новым фактам — новая запись рядом
+    assert faq.lookup(cfg, "Когда сможете выйти на работу?") == "Сразу."
+    assert path.read_text(encoding="utf-8").startswith(own)
+
+
+def test_learn_does_not_touch_file_it_cannot_append_to(cfg):
+    path = cfg.path(cfg.questions.faq_file)
+    path.write_text("[{match: [зарплат], answer: '150 000'}]\n", encoding="utf-8")  # список в одну строку
+    faq.learn(cfg, "Когда сможете выйти на работу?", "Через неделю.")
+    assert path.read_text(encoding="utf-8") == "[{match: [зарплат], answer: '150 000'}]\n"

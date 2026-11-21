@@ -75,6 +75,14 @@ HH_CAPTCHA_THEN_FORM = """<!doctype html><html lang="ru"><body>
 </div>
 </body></html>"""
 
+# Отклик ушёл сразу (отметка «Вы откликнулись»), кнопка «Add cover letter» есть, но поле письма не открывается.
+HH_SENT_NO_LETTER = """<!doctype html><html lang="ru"><body>
+<a href="#" data-qa="vacancy-response-link-top" onclick="this.remove(); document.body.insertAdjacentHTML('beforeend',
+   '<a data-qa=&quot;vacancy-response-link-view-topic&quot;>Вы откликнулись</a>'
+   + '<button type=&quot;button&quot; data-qa=&quot;responded-success-attach-cover-letter-text&quot;>Add cover letter</button>');
+   return false">Откликнуться</a>
+</body></html>"""
+
 QUESTION = """<div class="question"><p>Ваши ожидания по зарплате?</p><input type="text" name="q1"></div>"""
 
 # Хабр Карьера: «Откликнуться» сразу отправляет отклик, затем появляется поле письма и «Дополнить отклик».
@@ -176,6 +184,40 @@ def test_hh_captcha_passed_then_respond_again(site, cfg, monkeypatch):
     status, _ = _applier(site, cfg).apply(8, url, LETTER)
     assert status == "applied"
     assert site.evaluate("[window.clicked, window.sent]") == [2, LETTER]
+
+
+def test_hh_sent_without_letter_is_applied(site, cfg):
+    """Отклик ушёл, а поля письма нет — это отклик (идёт в дневной лимит), а не manual."""
+    url = "https://hh.ru/vacancy/9"
+    site.pages[url] = HH_SENT_NO_LETTER
+    status, note = _applier(site, cfg).apply(9, url, LETTER)
+    assert status == "applied" and note.startswith("отклик ушёл без письма")
+
+
+def test_hh_letter_crash_after_sent_is_applied(site, cfg, monkeypatch):
+    """Сбой при добавлении письма после ушедшего отклика — applied, а не ошибка."""
+    from hh_agent import applier
+
+    def boom(self):
+        raise RuntimeError("кнопку письма перекрыло окно")
+
+    monkeypatch.setattr(applier.Applier, "_open_letter", boom)
+    url = "https://hh.ru/vacancy/10"
+    site.pages[url] = HH_SENT_NO_LETTER
+    status, note = _applier(site, cfg).apply(10, url, LETTER)
+    assert (status, note) == ("applied", "отклик ушёл без письма: сбой RuntimeError")
+
+
+def test_hh_crash_before_respond_is_still_an_error(site, cfg, monkeypatch):
+    """На странице отметка отклика, но «Откликнуться» в этот раз не нажимали — ошибка не маскируется."""
+    from hh_agent import applier
+
+    a = _applier(site, cfg)
+    site.pages["https://hh.ru/vacancy/11"] = HH_APPLIED
+    site.goto("https://hh.ru/vacancy/11")
+    monkeypatch.setattr(applier.Applier, "_apply", lambda *args: (_ for _ in ()).throw(RuntimeError("нет сети")))
+    with pytest.raises(RuntimeError):
+        a.apply(11, "https://hh.ru/vacancy/11", LETTER)
 
 
 def test_hh_employer_question_from_faq(site, cfg):

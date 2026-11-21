@@ -23,6 +23,7 @@ def _fresh_stop(monkeypatch):
 class FakeApplier:
     """Отклик без браузера: статус по id вакансии (по умолчанию applied)."""
     calls: list[int] = []
+    letters: list[str] = []
     statuses: dict[int, tuple[str, str | None]] = {}
     on_apply = None
 
@@ -31,6 +32,7 @@ class FakeApplier:
 
     def apply(self, vid, url, letter, vacancy=""):
         FakeApplier.calls.append(vid)
+        FakeApplier.letters.append(letter)
         if FakeApplier.on_apply:
             FakeApplier.on_apply(vid)
         if self.mode.dry_run:
@@ -58,7 +60,7 @@ def auto(cfg, db, monkeypatch):
     monkeypatch.setattr(autopilot, "SiteTabs", lambda ctx, page: (lambda src: None))
     monkeypatch.setattr(autopilot, "is_logged_in", lambda page, src: True)
     monkeypatch.setattr(autopilot, "Applier", FakeApplier)
-    FakeApplier.calls, FakeApplier.statuses, FakeApplier.on_apply = [], {}, None
+    FakeApplier.calls, FakeApplier.letters, FakeApplier.statuses, FakeApplier.on_apply = [], [], {}, None
     return cfg
 
 
@@ -163,6 +165,36 @@ def test_autopilot_applies_to_vacancies_found_during_the_run(auto, db, monkeypat
     assert FakeApplier.calls == [7] and db.get(7)["status"] == "applied"
 
 
+def test_autopilot_waits_for_letters_from_analysis(auto, db, monkeypatch):
+    """Пока идёт оценка, вакансию без письма не берём: письмо напишет оценка, а не поток откликов."""
+    import time
+
+    def fake_scan(cfg, db_, page, sources):
+        if "hh" in sources:
+            db_.insert(8, title="ML Engineer 8", company="Acme", url="https://hh.ru/vacancy/8", status="new")
+        return 1
+
+    def fake_analyze(cfg, db_):
+        for r in db_.by_status("new"):
+            db_.update(r["id"], status="scored", score=90)  # оценка готова, письма ещё пишутся
+        time.sleep(0.5)
+        db_.update(8, cover_letter="Письмо из оценки")
+        return 1
+
+    class WorkerAnalyst:  # письмо, которое написал бы сам поток откликов
+        def __init__(self, cfg):
+            pass
+
+        def letter(self, row):
+            return "Письмо потока откликов"
+
+    monkeypatch.setattr(autopilot, "scan", fake_scan)
+    monkeypatch.setattr(autopilot.analyst_mod, "analyze_new", fake_analyze)
+    monkeypatch.setattr(autopilot.analyst_mod, "Analyst", WorkerAnalyst)
+    autopilot.run_auto(auto, db, produce=True)
+    assert FakeApplier.letters == ["Письмо из оценки"]
+
+
 def test_telegram_thread_reads_channels(auto, db, monkeypatch):
     auto.telegram.enabled, auto.telegram.channels = True, ["@ml_jobs"]
     reads = []
@@ -182,3 +214,22 @@ def test_telegram_thread_does_not_press_buttons_off_hours(auto, db, monkeypatch)
     monkeypatch.setattr(autopilot.channels, "run", lambda cfg, db_, **kw: reads.append(kw))
     autopilot.run_auto(auto, db)
     assert reads == [{"apply": None, "dry_run": False}]  # каналы читаем, но кнопку не жмём
+
+
+@pytest.mark.parametrize("hours, weekdays, when, inside", [
+    ((8, 23), False, "2026-11-18 08:00", True),
+    ((8, 23), False, "2026-11-18 23:00", False),
+    ((22, 6), False, "2026-11-18 23:30", True),   # через полночь: вечер
+    ((22, 6), False, "2026-11-19 05:59", True),   #   и утро
+    ((22, 6), False, "2026-11-18 12:00", False),
+    ((22, 6), True, "2026-11-21 02:00", True),    # ночь с пятницы на субботу — ещё пятница
+    ((22, 6), True, "2026-11-21 23:00", False),   # суббота вечером
+    ((22, 6), True, "2026-11-23 03:00", False),   # ночь с воскресенья на понедельник
+    ((8, 23), True, "2026-11-21 12:00", False),
+    ((0, 0), False, "2026-11-18 12:00", False),   # рабочих часов нет
+    ((0, 24), False, "2026-11-18 00:00", True),
+])
+def test_active_hours_window(cfg, hours, weekdays, when, inside):
+    from datetime import datetime
+    cfg.apply.auto.active_hours, cfg.apply.auto.weekdays_only = hours, weekdays
+    assert autopilot._in_window(cfg, datetime.fromisoformat(when)) is inside
