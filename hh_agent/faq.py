@@ -7,8 +7,9 @@
 
 Агент дополняет список сам: ответ LLM на вопрос, который не зависит от вакансии (зарплата, причина
 поиска, срок выхода, документы), записывается с learned: true и отпечатком questions.facts.
-Поменяли факты — выученные по старым ответы перестают использоваться (и перезапишутся новыми).
-Свои записи без learned не устаревают; править и удалять можно любые.
+Поменяли факты — выученные по старым ответы перестают использоваться (новый ответ допишется рядом).
+Свои записи без learned не устаревают; править и удалять можно любые. Агент файл не переписывает,
+а только дописывает в конец: ваши комментарии и записи остаются.
 """
 from __future__ import annotations
 
@@ -82,18 +83,24 @@ def learn(cfg: Config, text: str, answer: str) -> None:
         return
     facts = _facts_hash(cfg)
     with _LOCK:
-        entries = _load(cfg)
-        for e in entries:  # тот же вопрос уже есть: свою запись не трогаем, выученную обновляем
-            if any(_norm(m) == _norm(q) for m in e["match"]):
-                if not e.get("learned") or (e.get("facts") == facts):
-                    return
-                e.update(answer=answer, facts=facts)
-                break
-        else:
-            entries.append({"match": [q], "answer": answer, "learned": True, "facts": facts})
-        # Через временный файл: lookup из другого потока не прочитает файл наполовину (с обрезанным ответом).
+        for e in _load(cfg):  # тот же вопрос уже есть — своя запись или выученная по нынешним фактам
+            if any(_norm(m) == _norm(q) for m in e["match"]) and (not e.get("learned") or e.get("facts") == facts):
+                return
+        # Дописываем в конец, а не переписываем файл: ваши комментарии и записи, которые агент не разбирает
+        # (без answer, черновики), остаются как есть. Выученная по старым фактам запись тоже остаётся,
+        # но lookup её уже не использует.
         path = cfg.path(cfg.questions.faq_file)
+        old = path.read_text(encoding="utf-8") if path.exists() else HEADER + "\n"
+        entry = yaml.safe_dump([{"match": [q], "answer": answer, "learned": True, "facts": facts}],
+                               allow_unicode=True, sort_keys=False, width=100)
+        text = old + ("\n" if old and not old.endswith("\n") else "") + entry
+        try:
+            ok = isinstance(yaml.safe_load(text), list)
+        except yaml.YAMLError:
+            ok = False
+        if not ok:  # файл не в виде списка «- match: …» — дописать нельзя, не портим его
+            return
+        # Через временный файл: lookup из другого потока не прочитает файл наполовину (с обрезанным ответом).
         tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(HEADER + "\n" + yaml.safe_dump(entries, allow_unicode=True, sort_keys=False, width=100),
-                       encoding="utf-8")
+        tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)

@@ -100,6 +100,7 @@ class Applier:
         self.tuning = Store(cfg).tuning  # подстройка по правилам: паузы и таймауты
         self.form_timeout = self.tuning["form_timeout_ms"]
         self.confirm_timeout = self.tuning["confirm_timeout_ms"]
+        self._clicked = False
 
     # ── мелкие действия ────────────────────────────────────────────────
     def _beat(self) -> None:
@@ -332,6 +333,7 @@ class Applier:
         Каждый отклик пишется в журнал событий."""
         t0 = time.monotonic()
         mode = "dry_run" if self.mode.dry_run else "auto" if not self.mode.interactive else "review"
+        self._clicked = False  # нажата ли «Откликнуться» на hh в этом отклике
         try:
             if source_of(url) == "habr":
                 status, note = self._apply_habr(vid, url, letter)
@@ -344,7 +346,10 @@ class Applier:
                 raise
             self._debug_dump(vid, f"сбой отклика: {type(e).__name__}")
             log_event(self.cfg, "error", where="apply", vid=vid, mode=mode, message=f"{type(e).__name__}: {e}"[:500])
-            raise
+            if not self._sent():
+                raise
+            # Отклик уже ушёл, сломалось только письмо после него: это отклик (и в дневной лимит), а не ошибка.
+            status, note = "applied", f"отклик ушёл без письма: сбой {type(e).__name__}"
         log_event(self.cfg, "apply", vid=vid, mode=mode, status=status, note=note,
                   seconds=round(time.monotonic() - t0))
         return status, note
@@ -359,6 +364,7 @@ class Applier:
             return "manual", "на странице нет кнопки отклика"
         self._read_vacancy()
         self._click(SEL["respond"])
+        self._clicked = True
 
         try:
             page.wait_for_selector(AFTER_CLICK, timeout=self.form_timeout)
@@ -434,7 +440,19 @@ class Applier:
             self._type(field, letter)
             return self._finish(vid)
 
+        if self._sent():
+            return "applied", self._debug_dump(vid, "отклик ушёл без письма: поле для письма не найдено")
         return self._hand_over(letter, self._debug_dump(vid, "поле для письма не найдено"))
+
+    def _sent(self) -> bool:
+        """hh: после нашего клика «Откликнуться» на странице отметка отклика — он ушёл, даже если письмо не добавлено.
+        Без клика не смотрим: при сбое перехода на странице может остаться прошлая вакансия с её отметкой."""
+        if not self._clicked:
+            return False
+        try:
+            return self.page.locator(SEL["responded"]).count() > 0
+        except Exception:  # браузер закрыт
+            return False
 
 
     # ── Хабр Карьера ──────────────────────────────────────────────────

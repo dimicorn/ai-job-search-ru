@@ -165,3 +165,24 @@ def test_captcha_detection(page, html, captcha):
     from hh_agent.browser import captcha_visible
     page.set_content(html)
     assert captcha_visible(page) is captcha
+
+
+@pytest.mark.parametrize("in_worker, waits", [(False, False), (True, True)])
+def test_captcha_in_worker_thread_does_not_ask_terminal(monkeypatch, in_worker, waits):
+    """Терминал есть, но капча в рабочем потоке autopilot: не input(), а уведомление и ожидание человека."""
+    import threading
+
+    from hh_agent import browser
+
+    calls = []
+    monkeypatch.setattr(browser, "captcha_visible", lambda page: True)
+    monkeypatch.setattr(browser.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(browser, "_wait_for_human", lambda page: calls.append("wait"))
+    monkeypatch.setattr("builtins.input", lambda *a: calls.append("input") or "")
+    if in_worker:
+        t = threading.Thread(target=browser.check_captcha, args=(None,))
+        t.start()
+        t.join()
+    else:
+        browser.check_captcha(None)
+    assert calls == (["wait"] if waits else ["input"])

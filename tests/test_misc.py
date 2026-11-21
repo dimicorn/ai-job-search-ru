@@ -132,3 +132,28 @@ def test_samples_from_project_when_config_is_elsewhere(tmp_path):
     shutil.copy(wizard.sample(tmp_path, "config.example.yaml"), tmp_path / "config.yaml")
     shutil.copy(wizard.sample(tmp_path, "resume.example.md"), tmp_path / "resume.md")
     assert resume_is_template(load_config(tmp_path / "config.yaml"))  # шаблон узнаётся и без образца рядом
+
+
+def test_letters_batch_keeps_letter_written_meanwhile(cfg, db, monkeypatch):
+    """Пока шла пачка писем, письмо уже написал поток откликов (и оно ушло) — пачка его не перезаписывает."""
+    from hh_agent import analyst
+
+    cfg.analyst.letter_backend = "codex"
+    cfg.path(cfg.analyst.resume_file).write_text("# Резюме\n", encoding="utf-8")
+    for vid in (1, 2):
+        db.insert(vid, title=f"ML {vid}", company="Acme", url=f"https://hh.ru/vacancy/{vid}", status="new")
+
+    def assess(self, rows):
+        return {r["id"]: analyst.Assessment(score=90, verdict="apply", reasons=[], red_flags=[], cover_letter="")
+                for r in rows}
+
+    def letters(self, rows, reasons):
+        from hh_agent.db import DB  # поток откликов пишет через своё соединение
+        DB(cfg.path(cfg.db_path)).update(1, cover_letter="Письмо, ушедшее с откликом")  # пока пачка ждала LLM
+        return {r["id"]: "Здравствуйте!\n\nПисьмо пачки." for r in rows}
+
+    monkeypatch.setattr(analyst.Analyst, "assess_batch", assess)
+    monkeypatch.setattr(analyst.Analyst, "letters_batch", letters)
+    analyst.analyze_new(cfg, db)
+    assert db.get(1)["cover_letter"] == "Письмо, ушедшее с откликом"
+    assert db.get(2)["cover_letter"] == "Здравствуйте!\n\nПисьмо пачки."
