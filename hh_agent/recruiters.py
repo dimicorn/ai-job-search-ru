@@ -20,6 +20,7 @@ import asyncio
 import fcntl
 import random
 import re
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -208,13 +209,35 @@ def session_lock(cfg: Config):
     return f  # блокировка держится, пока файл открыт
 
 
+_loops = threading.local()  # цикл событий Telethon, созданный в этом потоке
+
+
+def _close_loop(loop: asyncio.AbstractEventLoop | None) -> None:
+    """Закрыть цикл прошлого клиента (он уже отключён): иначе autopilot копит по циклу на проход."""
+    if loop is None or loop.is_closed() or loop.is_running():
+        return
+    try:
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+    except Exception:
+        pass
+    finally:
+        loop.close()
+
+
 def _client(cfg: Config):
     from telethon.sync import TelegramClient
 
     t = cfg.telegram
     if not (t.api_id and t.api_hash):
         raise SystemExit("telegram: задайте api_id и api_hash в config.yaml (my.telegram.org → API development tools).")
-    asyncio.set_event_loop(asyncio.new_event_loop())  # Playwright закрывает свой цикл — Telethon нужен новый
+    _close_loop(getattr(_loops, "loop", None))
+    _loops.loop = asyncio.new_event_loop()  # Playwright закрывает свой цикл — Telethon нужен новый
+    asyncio.set_event_loop(_loops.loop)
     return TelegramClient(str(cfg.path(t.session)), t.api_id, t.api_hash)
 
 

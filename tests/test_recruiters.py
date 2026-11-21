@@ -223,3 +223,18 @@ def test_bot_silent_after_answer_for_long_gets_switch(cfg, db, bot, monkeypatch)
     bot.reply = lambda text: NO_MORE
     assert _dialog(cfg, db, bot) == "done"
     assert bot.sent == ["/change_vacancy"]
+
+
+def test_client_closes_previous_event_loop(cfg, monkeypatch):
+    import asyncio
+    import sys
+    from types import SimpleNamespace as NS
+    monkeypatch.setitem(sys.modules, "telethon.sync", NS(TelegramClient=lambda *a: NS()))
+    cfg.telegram.api_id, cfg.telegram.api_hash = 1, "x"
+    r._client(cfg)
+    first = asyncio.get_event_loop()
+    r._client(cfg)
+    second = asyncio.get_event_loop()
+    assert first.is_closed() and not second.is_closed()
+    r._close_loop(second)
+    asyncio.set_event_loop(None)
