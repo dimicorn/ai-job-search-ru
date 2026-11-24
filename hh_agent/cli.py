@@ -22,7 +22,7 @@ from .config import Config, load_config
 from .db import DB, dec_list
 from .learning import learn, report
 from .log import console
-from .scout import scan
+from .scout import drop_excluded_companies, scan
 
 LOGIN_HINT = {"hh": "как соискатель", "habr": "через Хабр Аккаунт"}
 
@@ -139,6 +139,7 @@ def _edit(text: str) -> str:
 
 
 def cmd_review(cfg: Config, db: DB, min_score: int | None = None, manual: bool = False) -> None:
+    drop_excluded_companies(cfg, db)
     if manual:  # отложенные: тесты, анкеты, нераспознанные формы — их проходите вы
         threshold = 0 if min_score is None else min_score
         rows = db.by_status("manual", min_score=threshold)

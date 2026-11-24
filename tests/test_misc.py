@@ -53,6 +53,28 @@ def test_prefilter(card, filters, reason):
     assert scout.prefilter(card, filters) == reason
 
 
+@pytest.mark.parametrize("company, hit", [
+    ("Т1", True), ("T1", True), ("Т1 ИИ", True), ("Т1 Сервионика", True), ("Холдинг T1", True),
+    ("КИТ1217", False), ("Т12", False), ("AT1 Group", False), (None, False),
+])
+def test_company_excluded_whole_name_with_digit(company, hit):
+    assert bool(Filters(companies_exclude=["Т1"]).company_excluded(company)) is hit
+
+
+def test_company_excluded_word_prefix():
+    f = Filters(companies_exclude=["Сбер"])
+    assert f.company_excluded("Сбербанк") and f.company_excluded("ПАО Сбер") and not f.company_excluded("Росбер")
+
+
+def test_drop_excluded_companies(cfg, db):
+    db.insert(1, title="ML", company="Т1 ИИ", url="https://hh.ru/vacancy/1", status="scored", score=90)
+    db.insert(2, title="ML", company="КИТ1217", url="https://hh.ru/vacancy/2", status="scored", score=90)
+    db.insert(3, title="ML", company="T1", url="https://hh.ru/vacancy/3", status="applied", score=90)
+    cfg.filters.companies_exclude = ["T1"]
+    assert scout.drop_excluded_companies(cfg, db) == 1
+    assert db.get(1)["status"] == "filtered" and db.get(2)["status"] == "scored" and db.get(3)["status"] == "applied"
+
+
 def test_html_to_text():
     assert scout.html_to_text("<p>Задачи:</p><ul><li>CV</li><li>NLP &amp; LLM</li></ul>") == "Задачи:\n• CV\n• NLP & LLM"
 

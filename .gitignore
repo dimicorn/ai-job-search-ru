@@ -3,6 +3,7 @@
 config.yaml
 resume.md
 *.bak
+*.bak-*
 *.tmp
 *.db
 __pycache__/
