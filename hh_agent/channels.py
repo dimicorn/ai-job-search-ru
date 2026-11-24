@@ -105,13 +105,12 @@ def _new_posts(client, entity, last_id: int, since: datetime) -> list:
 
 def _excluded(cfg: Config, title: str, company: str) -> str | None:
     f = cfg.filters
-    t, c = title.lower(), company.lower()
+    t = title.lower()
     for w in f.title_exclude:
         if w.lower() in t:
             return f"стоп-слово в названии: {w}"
-    for w in f.companies_exclude:
-        if w.lower() in c:
-            return f"компания в исключениях: {w}"
+    if w := f.company_excluded(company):
+        return f"компания в исключениях: {w}"
     return None
 
 

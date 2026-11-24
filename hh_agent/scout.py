@@ -62,10 +62,8 @@ def prefilter(card: dict[str, Any], f: Filters) -> str | None:
     for w in f.title_exclude:
         if w.lower() in title:
             return f"title: стоп-слово «{w}»"
-    company = (card["company"] or "").lower()
-    for c in f.companies_exclude:
-        if c.lower() in company:
-            return f"компания в чёрном списке «{c}»"
+    if c := f.company_excluded(card["company"]):
+        return f"компания в чёрном списке «{c}»"
     top = card["salary_to"] or card["salary_from"]
     if top is None and f.skip_without_salary:
         return "зарплата не указана"
@@ -74,6 +72,21 @@ def prefilter(card: dict[str, Any], f: Filters) -> str | None:
     if f.skip_with_employer_test and card["has_test"]:
         return "тест от работодателя"
     return None
+
+
+def drop_excluded_companies(cfg: Config, db: DB) -> int:
+    """Вакансии в очереди от компаний, добавленных в companies_exclude уже после сканирования, — в filtered.
+
+    Фильтр карточек работает только при сканировании; без этого прохода оценённые раньше вакансии
+    такой компании всё равно ушли бы в отклик."""
+    n = 0
+    for r in db.by_status("new", "scored", "manual", "error"):
+        if c := cfg.filters.company_excluded(r["company"]):
+            db.update(r["id"], status="filtered", filter_reason=f"компания в чёрном списке «{c}»")
+            n += 1
+    if n:
+        console.print(f"Убрано из очереди вакансий компаний из companies_exclude: {n}")
+    return n
 
 
 def html_to_text(s: str) -> str:

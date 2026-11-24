@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,6 +26,14 @@ class Search(BaseModel):
         return self
 
 
+# Кириллица, похожая на латиницу: «Т1» и «T1» в названии компании — одно и то же
+_LOOKALIKE = str.maketrans("авекмнорстух", "abekmhopctyx")
+
+
+def _norm(s: str) -> str:
+    return (s or "").lower().translate(_LOOKALIKE)
+
+
 class Filters(BaseModel):
     title_include_any: list[str] = Field(default_factory=list)
     title_exclude: list[str] = Field(default_factory=list)
@@ -34,6 +43,18 @@ class Filters(BaseModel):
     skip_without_salary: bool = False
     skip_with_employer_test: bool = False
     skip_duplicates: bool = True  # та же вакансия (название + компания) уже в базе — не открывать
+
+    def company_excluded(self, company: str | None) -> str | None:
+        """Слово из companies_exclude, с которого начинается слово в названии компании, или None.
+
+        «Сбер» ловит «Сбербанк» и «ПАО Сбер», но не «Росбер»; название с цифрой на конце совпадает
+        только целым словом: «Т1» ловит «Т1 ИИ», но не «КИТ1217» и не «Т12»."""
+        c = _norm(company or "")
+        for w in self.companies_exclude:
+            n = _norm(w.strip())
+            if n and re.search(r"(?<!\w)" + re.escape(n) + (r"(?!\w)" if n[-1].isdigit() else ""), c):
+                return w
+        return None
 
 
 class Analyst(BaseModel):

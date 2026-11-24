@@ -12,6 +12,9 @@ All docstrings, comments, CLI output, docs and commit-facing text are in **Russi
 
 ```bash
 uv sync && uv run playwright install chromium   # dev env (uv sync includes ruff, pytest)
+uv run ruff check . [--fix]                     # lint (rules in pyproject.toml)
+uv run pytest -q                                # all tests (CI runs this on Ubuntu + macOS)
+uv run pytest tests/test_parsing.py::test_name  # single test
 uv run hh-agent doctor [--online]               # environment/config self-check
 uv run python tests/fixtures/refresh.py         # re-capture live page fixtures (needs logged-in browser profile)
 ```

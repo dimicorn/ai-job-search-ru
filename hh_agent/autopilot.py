@@ -26,7 +26,7 @@ from .db import DB
 from .events import log_event
 from .learning import Store, learn
 from .log import console
-from .scout import scan
+from .scout import drop_excluded_companies, scan
 
 POLL_SECONDS = 5  # как часто поток откликов смотрит в базу, пока поиск и оценка ещё идут
 
@@ -373,6 +373,7 @@ def run_auto(cfg: Config, db: DB, dry_run: bool = False, limit: int | None = Non
 
 
 def _run_auto(cfg: Config, db: DB, dry_run: bool, limit: int | None, min_score: int | None, produce: bool) -> None:
+    drop_excluded_companies(cfg, db)
     au = cfg.apply.auto
     pace = Store(cfg).tuning["pace_multiplier"]
     threshold = au.min_score if min_score is None else min_score
